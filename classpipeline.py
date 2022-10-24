@@ -960,7 +960,7 @@ if args.rms_check:
                     # Reduction of spectra in the rms regions.
                     
                     os.chdir(config_folder)
-                    arguments = ['reduction.py', exporting_folder,
+                    arguments = ['classreduction.py', exporting_folder,
                                  ','.join(all_rms_spectra), '-smooth',
                                  smooth_factor, '-plots_folder', plots_folder,
                                   '--rms_check']
@@ -1234,7 +1234,7 @@ if args.line_search:
     os.chdir(config_folder)
     files_folder = exporting_folder
     if args.use_julia:
-        arguments = ['linesearch.jl', files_folder, ','.join(all_spectra),
+        arguments = ['classlinesearch.jl', files_folder, ','.join(all_spectra),
                      '--plots_folder', plots_folder,
                      '--width', line_width, '--smooth', smooth_factor,
                      '--threshold', intensity_threshold]
@@ -1243,7 +1243,7 @@ if args.line_search:
             arguments[0] = codes_folder + arguments[0]
             arguments = ['julia'] + arguments
     else:
-        arguments = ['linesearch.py', files_folder, ','.join(all_spectra),
+        arguments = ['classlinesearch.py', files_folder, ','.join(all_spectra),
                      '-plots_folder', plots_folder,
                      '-width', line_width, '-smooth', smooth_factor,
                      '-threshold', intensity_threshold]
@@ -1270,7 +1270,7 @@ if args.reduction:
     os.chdir(config_folder)
     files_folder = exporting_folder
     if args.use_julia:
-        arguments = ['reduction.jl', files_folder, ','.join(all_spectra),
+        arguments = ['classreduction.jl', files_folder, ','.join(all_spectra),
                      '--plots_folder', plots_folder,
                      '--smooth', smooth_factor,
                      '--rms_margin', rms_margin]
@@ -1280,7 +1280,7 @@ if args.reduction:
             os.chdir(original_folder)
             arguments = ['julia'] + arguments
     else:
-        arguments = ['reduction.py', files_folder, ','.join(all_spectra),
+        arguments = ['classreduction.py', files_folder, ','.join(all_spectra),
                      '-plots_folder', plots_folder,
                      '-smooth', smooth_factor,
                      '-rms_margin', rms_margin]
@@ -1459,7 +1459,7 @@ if args.average:
         
     # Running of the script that joints the overlapping spectra.
     os.chdir(original_folder)
-    arguments = ['average.py', config_folder + '/config-average-auto.yaml']
+    arguments = ['classaverage.py', config_folder + '/config-average-auto.yaml']
     if local_run:
         arguments[0] = codes_folder + arguments[0]
         arguments = ['python3'] + arguments
@@ -1563,7 +1563,7 @@ if args.combine:
         
     # Running of the script that joints the overlapping spectra.
     os.chdir(original_folder)
-    arguments = ['combine.py', config_folder + '/config-combine-auto.yaml']
+    arguments = ['classcombine.py', config_folder + '/config-combine-auto.yaml']
     if local_run:
         arguments[0] = codes_folder + arguments[0]
         arguments = ['python3'] + arguments
