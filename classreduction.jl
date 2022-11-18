@@ -634,9 +634,10 @@ for file in split(args["file"], ",")
         find_rms_region(frequency, intensity_red, rms_noise=rms_noise,
                         windows=windows, rms_threshold=0.1,
                         offset_threshold=0.05, reference_width=2*args["smooth"])
-    rms_regions[file] = rms_region
     if length(rms_region) == 0
         println("Warning: No RMS region was found for spectrum $file.")
+    rms_region = [Float32(frequency[1]), Float32(frequency[end])]
+    rms_regions[file] = rms_region
     end
 
     # Output.
