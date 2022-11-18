@@ -1,0 +1,59 @@
+data folder: 'input/'
+
+input files:
+    file1.30m:
+        sources-lines-telescopes:
+            TS1:
+                L1: 'common'
+                L2: 'common'
+                L3: 'common'
+            TS2:
+                L1: 'common'
+                L2: 'common'
+                L3: 'common'
+    file2.30m:
+        sources-lines-telescopes:
+            TS1:
+                L1: 'common'
+                L2: 'common'
+                L3: 'common'
+            TS2:
+                L1: 'common'
+                L2: 'common'
+                L3: 'common'
+    file3.30m:
+        sources-lines-telescopes:
+            TS1:
+                L1: 'common'
+                L2: 'common'
+                L3: 'common'
+            TS2:
+                L1: 'common'
+                L2: 'common'
+                L3: 'common'
+                
+common telescopes: ['R1', 'R2', 'R3']
+weighting mode: 'equal'
+check Doppler corrections: no
+only rms noise plots: yes
+
+rms noise check:
+    parameters 1:
+        scans per group: 1
+        source-line-telescopes:
+            TS1:
+                L1: ['R1']
+        frequency ranges (GHz):
+        - [58.0, 60.0]
+        - [66.0, 68.0]
+
+telescope efficiencies:
+    beam efficiency:  [0.81, 0.78,  0.74, 0.63, 0.59, 0.49, 0.35, 0.34]
+    frequency (GHz):  [86,   115,   145,  210,  230,  280,  340,  345]
+    
+reduction:
+    show plots: no
+    save plots: yes
+    reference width: 10
+    smoothing factor: 40
+    intensity threshold (rms): 10
