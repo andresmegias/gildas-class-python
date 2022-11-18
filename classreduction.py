@@ -412,9 +412,10 @@ for file in args.file.split(','):
             find_rms_region(frequency, intensity_red, rms_noise=rms_noise,
                             windows=windows, rms_threshold=0.1,
                             offset_threshold=0.05, reference_width=2*args.smooth)
-        rms_regions[file] = rms_region
         if len(rms_region) == 0:
             print('Warning: No RMS region was found for spectrum {}.'.format(file))
+            rms_region = [float(frequency[0]), float(frequency[-1])]
+        rms_regions[file] = rms_region
     
     # Output.
     output_file = file + '-r'

@@ -234,9 +234,11 @@ default_options = {
     'observatory': '',
     'telescope efficiencies': {},
     'frequency units': 'MHz',
+    'weighting mode': 'time',
     'fold': False,
     'combine all': True,
     'use only daily bad scans': False,
+    'check Doppler corrections': True,
     'only rms noise plots': False,
     'extra note': '',
     'reduction': {
@@ -308,9 +310,11 @@ bad_scans = options['bad scans']
 telescope_effs = options['telescope efficiencies']
 modify_beam_eff = len(telescope_effs) != 0
 frequency_units = options['frequency units']
+weight_mode = options['weighting mode']
 fold = options['fold']
 combine_all = options['combine all']
 only_daily_bad_scans = options['use only daily bad scans']
+check_doppler_corrections = options['check Doppler corrections']
 only_rms_plots = options['only rms noise plots']
 extra_note = options['extra note']
 if 'reduction' in options:
@@ -406,6 +410,7 @@ script = []
 # Loop for files.
 for file in input_files:
     script += ['file in ' + data_folder + file]
+    script += ['set weight ' + weight_mode]
     ext = '.' + file.split('.')[-1]
     if not combine_all:
         note = input_files[file]['note']
@@ -565,28 +570,36 @@ if args.selection:
 
 #%% Running of the class file for checking the Doppler corrections.
 
-    p = subprocess.Popen(['class', '@selection-doppler.class'],
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    doppler_text = []        
-    prev_line = ''
-    for output in p.stdout:
-        text_line = output.decode('utf-8').replace('\n','')
-        print(text_line)
-        if 'Doppler factor' in text_line and '***' not in text_line:
-            if (not 'Doppler factor' in prev_line
-                    or 'Doppler factor' in prev_line and '***' in prev_line): 
-                doppler_text += [remove_extra_spaces(text_line).split(' ')[-1]]
-        if 'I-OBSERVATORY' not in text_line:
-            prev_line = text_line
-
-    doppler_corr = {}
-    if len(doppler_text) == len(all_spectra):
-        for i in range(len(doppler_text)):
-            spectrum = str(all_spectra[i])
-            doppler_corr[spectrum] = doppler_text[i]
+    if check_doppler_corrections:
+        
+        p = subprocess.Popen(['class', '@selection-doppler.class'],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        doppler_text = []        
+        prev_line = ''
+        for output in p.stdout:
+            text_line = output.decode('utf-8').replace('\n','')
+            print(text_line)
+            if 'Doppler factor' in text_line and '***' not in text_line:
+                if (not 'Doppler factor' in prev_line
+                        or 'Doppler factor' in prev_line and '***' in prev_line): 
+                    doppler_text += [remove_extra_spaces(text_line).split(' ')[-1]]
+            if 'I-OBSERVATORY' not in text_line:
+                prev_line = text_line
+    
+        doppler_corr = {}
+        if len(doppler_text) == len(all_spectra):
+            for i in range(len(doppler_text)):
+                spectrum = str(all_spectra[i])
+                doppler_corr[spectrum] = doppler_text[i]
+        else:
+            raise Exception('Error reading Doppler corrections.')
+            
     else:
-        raise Exception('Error reading Doppler corrections.')
-
+        
+        doppler_corr = {}
+        for i in range(len(all_spectra)):
+            spectrum = str(all_spectra[i])
+            doppler_corr[spectrum] = '0'
     
     # Export of the Doppler corrections of each spectrum.
     save_yaml_dict(doppler_corr, './' + exporting_folder
@@ -644,7 +657,7 @@ if args.rms_check:
     previous_images = glob.glob('*rms-*.png')
     for image in previous_images:
         os.remove(image)
-    
+
     for option_list in rms_option_list:
         
         plt.close('all')
@@ -808,6 +821,7 @@ if args.rms_check:
                     script += ['file in ' + output_file_all]
                     script += ['file out ' + output_folder + 'rms_check-ind'+ext
                              + ' m /overwrite']
+                    script += ['set weight ' + weight_mode]
                     for i in range(0, num_obs, group_size):
                         script += ['set mode x {} {}'.format(*rms_freq_range)]
                         group_scans, group_obs, group_indices = [], [], []
@@ -843,7 +857,8 @@ if args.rms_check:
                             os.remove(exporting_folder + spectrum_fits)
                         script += ['fits write {} /mode spectrum'
                                   .format(exporting_folder + spectrum_fits)]
-                        script += ['modify doppler', 'modify doppler *']
+                        if check_doppler_corrections:
+                            script += ['modify doppler', 'modify doppler *']
                         
                     script += ['exit']
                     for i in range(len(script) - 1):
@@ -877,6 +892,7 @@ if args.rms_check:
                     script += ['file in ' + output_file_all]
                     script += ['file out ' + output_folder + 'rms_check-cum'+ext
                              + ' m /overwrite']
+                    script += ['set weight ' + weight_mode]
                     for i in range(0, num_obs, group_size):
                         group_scans, group_obs, group_indices = [], [], []
                         first = True
@@ -911,7 +927,8 @@ if args.rms_check:
                             os.remove(exporting_folder + spectrum_fits)
                         script += ['fits write {} /mode spectrum'
                                   .format(exporting_folder + spectrum_fits)]
-                        script += ['modify doppler', 'modify doppler *']
+                        if check_doppler_corrections:
+                            script += ['modify doppler', 'modify doppler *']
                         
                     script += ['exit']
                     for i in range(len(script) - 1):
@@ -940,22 +957,27 @@ if args.rms_check:
                             prev_line = text_line
                         
                     doppler_corr = {}
-                    if len(doppler_text) == len(all_rms_spectra):
-                        for i in range(len(doppler_text)):
-                            spectrum = str(all_rms_spectra[i])
-                            doppler_corr[spectrum] = doppler_text[i]
+                    if check_doppler_corrections:
+                        if len(doppler_text) == len(all_rms_spectra):
+                            for i in range(len(doppler_text)):
+                                spectrum = str(all_rms_spectra[i])
+                                doppler_corr[spectrum] = doppler_text[i]
+                        else:
+                            # print(len(doppler_text))
+                            # print(len(all_rms_spectra))
+                            # print(num_obs)
+                            message = 'Error reading Doppler corrections'
+                            raise Exception(message)
                     else:
-                        print(len(doppler_text))
-                        print(len(all_rms_spectra))
-                        print(num_obs)
-                        message = 'Error reading Doppler corrections'
-                        raise Exception(message)
+                        for i in range(len(all_rms_spectra)):
+                            spectrum = str(all_rms_spectra[i])
+                            doppler_corr[spectrum] = '0'
                         
                     save_yaml_dict(doppler_corr, exporting_folder
                                    + 'doppler_corrections.yaml',
                                    default_flow_style=False)
                     print('\nSaved Doppler corrections in ' + exporting_folder
-                          + '{}doppler_corrections.yaml.\n')
+                          + 'doppler_corrections.yaml.\n')
                     
                     # Reduction of spectra in the rms regions.
                     
@@ -1196,33 +1218,34 @@ if args.rms_check:
                             plt.legend(fontsize='small')
                             plt.tight_layout()
                 
+                if f+1 == num_freq_ranges:
+                    
+                    os.chdir(config_folder)
+                    os.chdir(os.path.realpath(plots_folder))
                 
-                os.chdir(config_folder)
-                os.chdir(os.path.realpath(plots_folder))
-            
-                plt.figure(1)
-                filename = 'rms-{}-{}{}.png'.format(title, group_size, s)
-                plt.savefig(filename, dpi=400)
-                print('Saved full RMS noise evolution in {}{}.'
-                      .format(plots_folder, filename))
+                    plt.figure(1)
+                    filename = 'rms-{}-{}{}.png'.format(title, group_size, s)
+                    plt.savefig(filename, dpi=400)
+                    print('Saved full RMS noise evolution in {}{}.'
+                          .format(plots_folder, filename))
+                    
+                    plt.figure(2)
+                    filename = 'rms-metric-{}-{}{}.png'.format(title, group_size, s)
+                    plt.savefig(filename, dpi=400)
+                    print('Saved RMS noise variation evolution in {}{}. '
+                          .format(plots_folder, filename))
+                    
+                    if num_partial_plots > 1:
+                        for i in range(num_partial_plots):
+                            plt.figure(3+i)
+                            filename = \
+                                'rms-{}-{}{}-({}).png'.format(title, group_size,
+                                                              s, i+1)
+                            plt.savefig(filename, dpi=300)
+                            print('Saved partial RMS noise evolution in {}{}.'
+                                  .format(plots_folder, filename))
                 
-                plt.figure(2)
-                filename = 'rms-metric-{}-{}{}.png'.format(title, group_size, s)
-                plt.savefig(filename, dpi=400)
-                print('Saved RMS noise variation evolution in {}{}. '
-                      .format(plots_folder, filename))
-                
-                if num_partial_plots > 1:
-                    for i in range(num_partial_plots):
-                        plt.figure(3+i)
-                        filename = \
-                            'rms-{}-{}{}-({}).png'.format(title, group_size,
-                                                          s, i+1)
-                        plt.savefig(filename, dpi=300)
-                        print('Saved partial RMS noise evolution in {}{}.'
-                              .format(plots_folder, filename))
-                
-                plt.close('all')
+    plt.close('all')
                         
     print()
 
@@ -1836,7 +1859,7 @@ if args.check_rms_plots:
     bad_scans = {'bad scans': bad_scans}
     
     os.chdir(original_folder)
-    os.chdir(config_folder + exporting_folder.replace('./','')) 
+    os.chdir(config_folder.replace('.','') + exporting_folder.replace('./','')) 
     
     # Export of the bad scans.
     save_yaml_dict(bad_scans, 'bad_scans.yaml', default_flow_style=None)
