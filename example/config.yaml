@@ -35,7 +35,7 @@ input files:
 common telescopes: ['R1', 'R2', 'R3']
 weighting mode: 'equal'
 check Doppler corrections: no
-only rms noise plots: yes
+only rms noise plots: no
 
 rms noise check:
     parameters 1:
