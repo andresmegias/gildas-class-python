@@ -1,4 +1,4 @@
-# Python Reduction Pipeline for CLASS
+# Automated GILDAS-CLASS Pipeline
 
 Python pipeline to use GILDAS-CLASS in an automated way. It consists of five Python 3 scripts (`classpipeline.py`, `classlinesearch.py`, `classreduction.py`, `classaverage.py`, `classcombine.py`) and two optional Julia scripts (`classlinesearch.jl`, `classreduction.jl`).
 
