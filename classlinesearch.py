@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Python Reduction Pipeline for CLASS
------------------------------------
+Automated GILDAS-CLASS Pipeline
+-------------------------------
 Line search mode
 Version 1.0
 
@@ -57,8 +57,6 @@ def full_path(text):
         path = os.path.expanduser('~') + path[1:]  
     path = str(os.path.realpath(path))
     return path
-
- 
 
 def get_windows(x, cond, margin=0.0, width=10.0):
     """

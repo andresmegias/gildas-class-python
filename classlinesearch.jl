@@ -1,7 +1,7 @@
 #!/usr/bin/env julia
 """
-Python Reduction Pipeline for CLASS
------------------------------------
+Automated GILDAS-CLASS Pipeline
+-------------------------------
 Line search mode
 Version 1.0
 

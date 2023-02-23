@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Python Reduction Pipeline for CLASS
------------------------------------
+Automated GILDAS-CLASS Pipeline
+-------------------------------
 Combine mode
 Version 1.0
 
