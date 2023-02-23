@@ -273,8 +273,8 @@ if not (args.selection or args.line_search or args.reduction or args.average
 
 # Starting.
 time1 = time.time()
-print('\nPython Reduction Pipeline for CLASS')
-print("-----------------------------------")
+print('\nAutomated GILDAS-CLASS Pipeline')
+print("---------------------------------")
 print('\nStarting the processing of the data.')
 
 # Folders.
