@@ -4,4 +4,4 @@ Python pipeline to use GILDAS-CLASS in an automated way. It consists of five Pyt
 
 This software allows to use the package CLASS from the software GILDAS, by IRAM, in an automated way. You can check the user guide ([`userguide.pdf`](https://github.com/andresmegias/gildas-class-python/blob/main/userguide.pdf)) and the example files (inside the `example` folder) to learn how to use it.
 
-GILDAS website: https://iram.fr/IRAMFR/GILDAS/
+GILDAS website: https://iram.fr/IRAMFR/GILDAS/.
