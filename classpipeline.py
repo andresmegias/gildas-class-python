@@ -4,7 +4,7 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Main script
-Version 1.0
+Version 1.1
 
 Copyright (C) 2022 - Andrés Megías Toledano
 
@@ -114,7 +114,7 @@ def remove_extra_spaces(input_text):
         Resulting text.
     """
     text = input_text
-    for i in range(15):
+    for i in range(12):
         if '  ' in text:
             text = text.replace('  ', ' ')
     if text.startswith(' '):
@@ -273,8 +273,9 @@ if not (args.selection or args.line_search or args.reduction or args.average
 
 # Starting.
 time1 = time.time()
-print('\nAutomated GILDAS-CLASS Pipeline')
-print("---------------------------------")
+print()
+print('Automated GILDAS-CLASS Pipeline')
+print("-------------------------------")
 print('\nStarting the processing of the data.')
 
 # Folders.
@@ -309,6 +310,8 @@ observatory = options['observatory']
 bad_scans = options['bad scans']
 telescope_effs = options['telescope efficiencies']
 modify_beam_eff = len(telescope_effs) != 0
+if modify_beam_eff and 'beam efficiency' in telescope_effs:
+    telescope_effs = {'default': telescope_effs}
 frequency_units = options['frequency units']
 weight_mode = options['weighting mode']
 fold = options['fold']
@@ -1002,7 +1005,8 @@ if args.rms_check:
                     # Calibration of the RMS noise and saving of the data.
                     
                     if modify_beam_eff:
-                        with open(exporting_folder+'frequency_ranges.yaml') as file:
+                        with open(exporting_folder
+                                  + 'frequency_ranges.yaml') as file:
                             frequency_ranges = yaml.safe_load(file)
                     
                     num_rms = len(all_rms_spectra)
@@ -1021,18 +1025,37 @@ if args.rms_check:
                                         output_spectra_rms['rms_check-cum'+ext])
                     for spectrum_ind, spectrum_cum in total_spectra:
                         if modify_beam_eff:
-                            mean_freq = np.mean(frequency_ranges[spectrum])*to_GHz
+                            mean_freq = np.mean(frequency_ranges[spectrum])
+                            mean_freq *= to_GHz
+                            keys = list(telescope_effs.keys())
+                            if keys == ['default']:
+                                key = keys[0]
+                            else:
+                                telescope = spectrum_ind.split('-')[-1]
+                                key = 'default'
+                                for key_i in telescope_effs:
+                                    if 'default' != key_i:
+                                        if not '*' in key_i and key_i == telescope:
+                                            key = key_i
+                                            break
+                                        elif ('*' in key_i and
+                                              key_i.replace('*','') in telescope):
+                                            key = key_i
+                                            break
+                            if not key in telescope_effs:
+                                raise Exception('Missing {} beam efficiency.'
+                                                .format(key))
                             beam_eff = np.interp(mean_freq,
-                                                 telescope_effs['frequency (GHz)'],
-                                                 telescope_effs['beam efficiency'])
+                                        telescope_effs[key]['frequency (GHz)'],
+                                        telescope_effs[key]['beam efficiency'])
                             beam_eff = float(beam_eff)
                             rms_noises[spectrum_ind] /= beam_eff
                             rms_noises[spectrum_cum] /= beam_eff
                         rms_ind += [rms_noises[spectrum_ind]]
                         rms_cum += [rms_noises[spectrum_cum]]
                         
-                    save_yaml_dict(rms_noises, exporting_folder
-                                   + 'rms_noises.yaml', default_flow_style=False)
+                    save_yaml_dict(rms_noises, exporting_folder +
+                                   'rms_noises.yaml', default_flow_style=False)
                     print('Saved calibrated RMS noises in {}rms_noises.yaml.'
                           .format(exporting_folder))      
                     
@@ -1139,7 +1162,7 @@ if args.rms_check:
                     plt.figure(2)
                     
                 plt.plot(locs, diff_rms_cum, '.', color=color,
-                         label='{} MHz, RMS variation'.format(range_text[1:-1]))
+                        label='{} MHz, RMS variation'.format(range_text[1:-1]))
                 plt.plot(locs, metric, '+', color=color,
                          label='{} MHz, weighted RMS variation'
                          .format(range_text[1:-1]))
@@ -1230,7 +1253,8 @@ if args.rms_check:
                           .format(plots_folder, filename))
                     
                     plt.figure(2)
-                    filename = 'rms-metric-{}-{}{}.png'.format(title, group_size, s)
+                    filename = 'rms-metric-{}-{}{}.png'.format(title,
+                                                               group_size, s)
                     plt.savefig(filename, dpi=400)
                     print('Saved RMS noise variation evolution in {}{}. '
                           .format(plots_folder, filename))
@@ -1238,15 +1262,13 @@ if args.rms_check:
                     if num_partial_plots > 1:
                         for i in range(num_partial_plots):
                             plt.figure(3+i)
-                            filename = \
-                                'rms-{}-{}{}-({}).png'.format(title, group_size,
-                                                              s, i+1)
+                            filename = 'rms-{}-{}{}-({}).png'.format(title,
+                                                            group_size, s, i+1)
                             plt.savefig(filename, dpi=300)
                             print('Saved partial RMS noise evolution in {}{}.'
                                   .format(plots_folder, filename))
-                
-    plt.close('all')
-                        
+                            
+    plt.close('all')                 
     print()
 
 #%% Running of the script that identifies the more visible lines and creates
@@ -1344,9 +1366,26 @@ if args.reduction:
             script += ['fits read ' + exporting_folder + spectrum + '-r.fits']
             if modify_beam_eff:
                 mean_freq = np.mean(frequency_ranges[spectrum]) * to_GHz
+                keys = list(telescope_effs.keys())
+                if keys == ['default']:
+                    key = keys[0]
+                else:
+                    telescope = spectrum.split('-')[-1]
+                    key = 'default'
+                    for key_i in telescope_effs:
+                        if 'default' != key_i:
+                            if not '*' in key_i and key_i == telescope:
+                                key = key_i
+                                break
+                            elif ('*' in key_i and
+                                  key_i.replace('*','') in telescope):
+                                key = key_i
+                                break
+                if not key in telescope_effs:
+                    raise Exception('Missing {} beam efficiency.'.format(key))
                 beam_eff = np.interp(mean_freq,
-                                     telescope_effs['frequency (GHz)'],
-                                     telescope_effs['beam efficiency'])
+                                     telescope_effs[key]['frequency (GHz)'],
+                                     telescope_effs[key]['beam efficiency'])
                 rms_noises[spectrum] /= float(beam_eff)
                 script += ['modify beam_eff {}'.format(round(beam_eff,2))]
                 beam_effs[str(spectrum)] = float(beam_eff)
@@ -1482,7 +1521,7 @@ if args.average:
         
     # Running of the script that joints the overlapping spectra.
     os.chdir(original_folder)
-    arguments = ['classaverage.py', config_folder + '/config-average-auto.yaml']
+    arguments = ['classaverage.py', config_folder +'/config-average-auto.yaml']
     if local_run:
         arguments[0] = codes_folder + arguments[0]
         arguments = ['python3'] + arguments
@@ -1586,7 +1625,7 @@ if args.combine:
         
     # Running of the script that joints the overlapping spectra.
     os.chdir(original_folder)
-    arguments = ['classcombine.py', config_folder + '/config-combine-auto.yaml']
+    arguments = ['classcombine.py', config_folder +'/config-combine-auto.yaml']
     if local_run:
         arguments[0] = codes_folder + arguments[0]
         arguments = ['python3'] + arguments

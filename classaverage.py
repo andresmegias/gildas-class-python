@@ -4,7 +4,7 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Averaging mode
-Version 1.0
+Version 1.1
 
 Copyright (C) 2022 - Andrés Megías Toledano
 
@@ -358,7 +358,7 @@ for input_file in input_files:
             script += ['file in ' + output_folder + group_name + '-temp' + ext]
             script += ['file out ' + output_folder + output_file]
             script += ['find /all', 'list']
-            script += ['set weight sigma', 'stitch /resample']
+            script += ['set weight sigma', 'stitch /resample /nocheck']
             script += ['write']
         
         # End of the script.
