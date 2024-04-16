@@ -41,7 +41,7 @@ telescope efficiencies:
     frequency (GHz):  [86,   115,   145,  210,  230,  280,  340,  345]
     
 reduction:
-    show plots: no
+    check windows: yes
     save plots: yes
     reference width: 10
     smoothing factor: 40
