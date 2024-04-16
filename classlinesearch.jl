@@ -3,9 +3,9 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Line search mode
-Version 1.0
+Version 1.2
 
-Copyright (C) 2022 - Andrés Megías Toledano
+Copyright (C) 2024 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -98,7 +98,7 @@ function rolling_function(func::Function, y::Vector{Float64}, roll_size::Int)
     y_f : Vector
         Resultant array.
     """
-    min_size = 3
+    min_size = 1
     roll_size = Int(roll_size) + (Int(roll_size) + 1) % 2
     roll_size = max(min_size, roll_size)
     N = length(y)
@@ -265,10 +265,10 @@ function rolling_sigma_clip_args(x::Vector{Float64}, y::Vector{Float64};
     return cond
 end
 
-function reduce_curve(x::Vector{Float64}, y::Vector{Float64};
+function fit_baseline(x::Vector{Float64}, y::Vector{Float64};
                       windows::Matrix{Float64}, smooth_size::Int)
     """
-    Reduce the curve ignoring the specified windows.
+    Fit the baseline of the curve ignoring the specified windows.
 
     Parameters
     ----------
@@ -284,7 +284,7 @@ function reduce_curve(x::Vector{Float64}, y::Vector{Float64};
     Returns
     -------
     y3 : Vector
-        Reduced array.
+        Baseline of the curve.
     """
     cond = regions_args(x, windows)
     x_ = x[cond]
@@ -354,7 +354,7 @@ function identify_lines(x::Vector{Float64}, y::Vector{Float64}; smooth_size::Int
         windows = get_windows(x, _cond, margin=1.5, width=line_width)
 
         if i < iters
-            y2 = reduce_curve(x, y, windows=windows, smooth_size=smooth_size)
+            y2 = fit_baseline(x, y, windows=windows, smooth_size=smooth_size)
         end
 
     end
@@ -452,8 +452,6 @@ argparse.@add_arg_table! aps begin
     default = "plots"
     "--rolling_sigma"
     action = :store_true
-    "--no_plots"
-    action = :store_true
     "--save_plots"
     action = :store_true
 end
@@ -479,7 +477,7 @@ for file in split(args["file"], ",")
         identify_lines(frequency, intensity, smooth_size=args["smooth"],
                        line_width=args["width"], sigmas=args["threshold"],
                        iters=2, rolling_sigma_clip=args["rolling_sigma"])
-    intensity_cont = reduce_curve(frequency, intensity, windows=windows,
+    intensity_cont = fit_baseline(frequency, intensity, windows=windows,
                                   smooth_size=args["smooth"])
     intensity_red = intensity .- intensity_cont
 
@@ -498,7 +496,7 @@ for file in split(args["file"], ",")
 
     #%% Plots.
 
-    if (!args["no_plots"]) | args["save_plots"]
+    if args["save_plots"]
 
         plt.figure(1, figsize=(10,7))
         plt.clf()
@@ -592,13 +590,6 @@ for file in split(args["file"], ",")
             println()
             cd(original_folder)
             cd(safe_realpath(args["folder"]))
-        end
-
-        # Show plots.
-        if ! args["no_plots"]
-            plt.show()
-        else
-            plt.close("all")
         end
 
     end

@@ -4,9 +4,9 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Reduction mode
-Version 1.0
+Version 1.2
 
-Copyright (C) 2022 - Andrés Megías Toledano
+Copyright (C) 2024 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -24,6 +24,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # Libraries and functions.
 import os
 import gc
+import sys
+import copy
+import time
 import argparse
 import yaml
 import numpy as np
@@ -31,31 +34,9 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from scipy.stats import median_abs_deviation
 from scipy.interpolate import UnivariateSpline
+from matplotlib.backend_bases import MouseEvent, KeyEvent
 
 # Custom functions.
-
-def rolling_window(y, window):
-    """
-    Group the input data according to the specified window size.
-    
-    Function by Erik Rigtorp.
-
-    Parameters
-    ----------
-    y : array
-        Input data.
-    window : int
-        Size of the windows to group the data.
-
-    Returns
-    -------
-    y2
-        Output array.
-    """
-    shape = y.shape[:-1] + (y.shape[-1] - window + 1, window)
-    strides = y.strides + (y.strides[-1],)
-    y_w = np.lib.stride_tricks.as_strided(y, shape=shape, strides=strides)
-    return y_w
 
 def rolling_function(func, y, size, **kwargs):
     """
@@ -76,11 +57,22 @@ def rolling_function(func, y, size, **kwargs):
     -------
     y_f : array
         Resultant array.
-
     """
+    
+    def rolling_window(y, window):
+        """
+        Group the input data according to the specified window size.
+        
+        Function by Erik Rigtorp.
+        """
+        shape = y.shape[:-1] + (y.shape[-1] - window + 1, window)
+        strides = y.strides + (y.strides[-1],)
+        y_w = np.lib.stride_tricks.as_strided(y, shape=shape, strides=strides)
+        return y_w
+    
     size = int(size) + (int(size) + 1) % 2
     size = max(7, size)
-    min_size = size//3
+    min_size = 1
     N = len(y)
     y_c = func(rolling_window(y, size), -1, **kwargs)
     M = min(N, size) // 2
@@ -119,9 +111,34 @@ def regions_args(x, windows, margin=0):
         cond *= (x <= x1 - dx*margin) + (x >= x2 + dx*margin)
     return cond
 
-def reduce_curve(x, y, windows, smooth_size):
+def sigma_clip_args(y, sigmas=6.0, iters=2):
     """
-    Reduce the curve ignoring the specified windows.
+    Apply a sigma clip and return a mask of the remaining data.
+
+    Parameters
+    ----------
+    y : array
+        Input data.
+    sigmas : float, optional
+        Number of standard deviations used as threshold. The default is 4.0.
+    iters : int, optional
+        Number of iterations performed. The default is 3.
+
+    Returns
+    -------
+    cond : array (bool)
+        Mask of the remaining data after applying the sigma clip.
+    """
+    cond = np.ones(len(y), dtype=bool)
+    abs_y = abs(y)
+    for i in range(iters):
+        mad = median_abs_deviation(abs_y[cond], scale='normal')
+        cond *= abs_y < sigmas*mad
+    return cond
+
+def fit_baseline(x, y, windows, smooth_size):
+    """
+    Fit the baseline of the curve ignoring the specified windows.
 
     Parameters
     ----------
@@ -137,7 +154,7 @@ def reduce_curve(x, y, windows, smooth_size):
     Returns
     -------
     y3 : array
-        Reduced array.
+        Baseline of the curve.
     """
     
     cond = regions_args(x, windows)
@@ -157,30 +174,6 @@ def reduce_curve(x, y, windows, smooth_size):
     y3 = rolling_function(np.mean, y3, smooth_size//3)
         
     return y3
-
-def sigma_clip_args(y, sigmas=6.0, iters=2):
-    """
-    Apply a sigma clip and return a mask of the remaining data.
-
-    Parameters
-    ----------
-    y : array
-        Input data.
-    sigmas : float, optional
-        Number of deviations used as threshold. The default is 6.0.
-    iters : int, optional
-        Number of iterations performed. The default is 3.
-
-    Returns
-    -------
-    cond : array (bool)
-        Mask of the remaining data after applying the sigma clip.
-    """
-    cond = np.ones(len(y), dtype=bool)
-    abs_y = abs(y)
-    for i in range(iters):
-        cond *= abs_y < sigmas*median_abs_deviation(abs_y[cond], scale='normal')
-    return cond
 
 def load_spectrum(file, load_fits=False):
     """
@@ -351,6 +344,249 @@ def find_rms_region(x, y, rms_noise, windows=[], rms_threshold=0.1,
                   float(central_freq + width/2*resolution)]
     return rms_region
 
+def format_windows(selected_points):
+    """Format the selected points into windows."""
+    are_points_even = len(selected_points) % 2 == 0
+    windows = selected_points[:] if are_points_even else selected_points[:-1]
+    windows = np.array(windows).reshape(-1,2)
+    for (i, x1x2) in enumerate(windows):
+        x1, x2 = min(x1x2), max(x1x2)
+        windows[i,:] = [x1, x2]
+    return windows
+
+def get_windows(mask, x):
+    """Obtain the ranges of the input mask associated with the array x."""
+    windows = []
+    in_window = False
+    for i in range(len(x)-1):
+        if not in_window and mask[i] == True:
+            in_window = True
+            window = [x[i]]
+        elif in_window and mask[i] == False:
+            in_window = False
+            window += [(x[i-1] + x[i])/2]
+            windows += [window]
+    if in_window:
+        window += [x[-1]]
+        windows += [window]
+    elif not in_window and x[-1] == True:
+        window = [(x[-2] + x[-1])/2, x[-1]]
+        windows += [window]
+    return windows
+
+def get_mask(windows, x):
+    """Obtain a mask corresponding to the input windows on the array x"""
+    mask = np.zeros(len(x), bool)
+    for x1x2 in windows:
+        x1, x2 = min(x1x2), max(x1x2)
+        mask |= (x >= x1) & (x <= x2)
+    return mask
+
+def invert_windows(windows, x):
+    """Obtain the complementary of the input windows for the array x."""
+    mask = get_mask(windows, x)
+    windows = get_windows(~mask, x)
+    return windows
+
+def calculate_ylims(spectrum, x_lims=None, perc1=0., perc2=100.,
+                    rel_margin_y=0.04):
+    """Calculate vertical limits for the given spectrum."""
+    frequency = spectrum['frequency']
+    intensity = spectrum['intensity']
+    mask = (frequency >= x_lims[0]) & (frequency <= x_lims[1])
+    intensity = intensity[mask]
+    y1 = np.nanpercentile(intensity, perc1)
+    y2 = np.nanpercentile(intensity, perc2)
+    margin = rel_margin_y * (y2 - y1)
+    y_lims = [y1 - margin, y2 + margin]
+    return y_lims 
+
+def plot_windows(selected_points):
+    """Plot the current selected windows."""
+    for x in selected_points:
+        plt.axvline(x, color='darkgray', alpha=1.)
+    windows = format_windows(selected_points)
+    for (x1,x2) in windows:
+        plt.axvspan(x1, x2, transform=plt.gca().transAxes,
+                    color='lightgray', alpha=1.)
+
+def do_reduction(spectrum, selected_points, smooth_size):
+    """Reduce the data."""
+    if len(selected_points) == 0:
+        return
+    windows = format_windows(selected_points)
+    frequency = spectrum['frequency']
+    intensity = spectrum['intensity']
+    baseline = fit_baseline(frequency, intensity, windows, smooth_size)
+    spectrum['baseline'] = baseline
+ 
+def plot_data(spectrum):
+    """
+    Plot spectrum contained in the input dictionary.
+    
+    Parameters
+    ----------
+    spectrum : dict
+        Dictionary containing the following elements of the spectrum:
+            frequency : array (float)
+            intensity : array (float)
+            baseline : array (float)
+    """
+
+    frequency = spectrum['frequency']
+    intensity = spectrum['intensity']
+    intensity_cont = spectrum['baseline']
+    intensity_red = intensity - intensity_cont
+
+    fig = plt.figure(1, figsize=(10,7))
+    plt.clf()
+    plt.subplots_adjust(hspace=0, wspace=0)
+    
+    sp1 = plt.subplot(2,1,1)
+    plt.step(frequency, intensity, where='mid', color='black', ms=6)
+    plt.plot(frequency, intensity_cont, 'tab:green', label='fitted baseline')
+    if not args.rms_check:
+        plot_windows(selected_points)
+    plt.axvspan(None, None, facecolor='lightgray', edgecolor='darkgray',
+                label='masked windows')
+    plt.ticklabel_format(style='sci', useOffset=False)
+    plt.xlim(x_lims)
+    try:
+        plt.ylim(y_lims)
+    except:
+        pass
+    plt.xlabel('frequency (MHz)')
+    plt.ylabel('intensity (K)')
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+
+    plt.subplot(2,1,2, sharex=sp1)
+    plt.step(frequency, intensity_red, where='mid', color='black')
+    if not args.rms_check:
+        plot_windows(selected_points)
+    plt.ticklabel_format(style='sci', useOffset=False)
+    plt.xlim(x_lims)
+    plt.xlabel('frequency (MHz)')
+    plt.ylabel('reduced intensity (K)')
+    plt.tight_layout()
+
+    title = 'Full spectrum - {}\n'.format(file)
+    fontsize = max(7, 12 - 0.1*max(0, len(title) - 85))
+    plt.suptitle(title, fontsize=fontsize, fontweight='semibold')
+    plt.tight_layout(pad=0.7, h_pad=0.6, w_pad=0.1)
+    plt.text(0.98, 0.96, 'check terminal\nfor instructions',
+             ha='right', va='top', transform=plt.gca().transAxes,
+             bbox=dict(edgecolor=[0.8]*3, facecolor='white'))
+    
+    return fig
+ 
+#%% Functions to create interactive mode.
+
+def click1(event):
+    """Interact with the plot by clicking on it."""
+    if type(event) is not MouseEvent:
+        pass
+    global click_time
+    click_time = time.time()
+
+def click2(event):
+    """Interact with the plot by clicking on it."""
+    if type(event) is not MouseEvent:
+        pass
+    button = str(event.button).lower().split('.')[-1]
+    if button in ('left', 'right', '1', '3'):
+        global click_time
+        elapsed_click_time = time.time() - click_time
+        x = event.xdata
+        if (elapsed_click_time > 0.5  # s
+                or x is None or x is not None and not np.isfinite(x)):
+            return 
+        global spectrum, selected_points, data_log, ilog
+        if button in ('left', '1'):
+            selected_points += [x]
+            for i in (1,2):
+                plt.subplot(2,1,i)
+                plt.axvline(x, color='darkgray', alpha=1.)
+            are_points_even = len(selected_points) % 2 == 0
+            if are_points_even:
+                x1, x2 = selected_points[-2:]
+                for i in (1,2):
+                    plt.subplot(2,1,i)
+                    plt.axvspan(x1, x2, transform=plt.gca().transAxes,
+                                color='lightgray', alpha=1.)
+        else:
+            if len(selected_points) == 0:
+                return
+            are_points_even = len(selected_points) % 2 == 0
+            was_removed = False
+            if are_points_even:
+                windows = np.array(selected_points).reshape(-1,2)
+                for x1x2 in windows:
+                    x1, x2 = min(x1x2), max(x1x2)
+                    if x1 < x < x2:
+                        selected_points.remove(x1)
+                        selected_points.remove(x2)
+                        was_removed = True
+                        break
+            if not was_removed:
+                del selected_points[-1]
+            plot_data(spectrum)
+            plot_windows(selected_points)
+        data = {'spectrum': spectrum, 'selected_points': selected_points}
+        data_log = data_log[:ilog+1] + [copy.deepcopy(data)]
+        ilog += 1
+        plt.draw()    
+
+def press_key(event):
+    """Interact with the plot when pressing a key."""
+    if type(event) is not KeyEvent:
+        pass
+    global spectrum, selected_points, data_log, ilog, x_lims, y_lims
+    if event.key == 'enter':
+        data_log = data_log[:ilog+1]
+        plt.close('all')
+    elif event.key == 'escape':
+        print('To exit, press Ctrl+C in the terminal.')
+    plt.subplot(2,1,1)
+    x_lims = plt.xlim()
+    y_lims = plt.ylim()
+    if event.key in ('z', 'Z', '<', 'left', 'right'):
+        x_range = x_lims[1] - x_lims[0]
+        if event.key in ('z', 'Z', '<'):
+            if event.key == 'z':
+                x_lims = [x_lims[0] + x_range/4, x_lims[1] - x_range/4]
+            else:
+                x_lims = [x_lims[0] - 2*x_range, x_lims[1] + 2*x_range]
+                x_lims[0] = max(x_lims[0], spectrum['frequency'].min())
+                x_lims[1] = min(x_lims[1], spectrum['frequency'].max())
+        else:
+            if event.key == 'left':
+                x_lims = [x_lims[0] - x_range/4, x_lims[1] - x_range/4]
+            elif event.key == 'right':
+                x_lims = [x_lims[0] + x_range/2, x_lims[1] + x_range/2]
+        y_lims = calculate_ylims(spectrum, x_lims, perc1=0, perc2=100)
+    elif event.key in ('r', 'R'):
+        factor = copy.copy(args.smooth)
+        if 'R' in event.key:
+            text = input('- Enter smoothing factor for baseline: ')
+            factor = int(''.join([char for char in text if char.isdigit()]))
+        do_reduction(spectrum, selected_points, factor)
+    elif event.key in ('tab', '\t'):
+        selected_points = []
+    elif event.key in ('ctrl+z', 'cmd+z', 'ctrl+Z', 'cmd+Z'):
+        ilog = (max(0, ilog-1) if 'z' in event.key
+                else min(len(data_log)-1, ilog+1))
+        data = copy.deepcopy(data_log[ilog])
+        spectrum = data['spectrum']
+        selected_points = data['selected_points']
+    if event.key in ('r', 'R', 'tab'):
+            data = {'spectrum': spectrum, 'selected_points': selected_points}
+            data_log = data_log[:ilog+1] + [copy.deepcopy(data)]
+            ilog += 1
+    plot_data(spectrum)
+    plot_windows(selected_points)
+    plt.draw()
+
 # Arguments.
 parser = argparse.ArgumentParser()
 parser.add_argument('folder')
@@ -359,23 +595,32 @@ parser.add_argument('-smooth', default=20, type=int)
 parser.add_argument('-sigmas', default=4, type=float)
 parser.add_argument('-rms_margin', default=0.1, type=float)
 parser.add_argument('-plots_folder', default='plots')
-parser.add_argument('--no_plots', action='store_true')
+parser.add_argument('--check_windows', action='store_true')
 parser.add_argument('--save_plots', action='store_true')
 parser.add_argument('--rms_check', action='store_true')
 args = parser.parse_args()
 original_folder = os.path.realpath(os.getcwd())
 os.chdir(args.folder)
 
+# Remove keymaps for interactive mode.
+if args.check_windows:
+    keymaps = ('back', 'copy', 'forward', 'fullscreen', 'grid', 'grid_minor',
+               'help', 'home', 'pan', 'quit', 'quit_all', 'save', 'xscale',
+               'yscale', 'zoom')
+    for keymap in keymaps:            
+        plt.rcParams.update({'keymap.' + keymap: []})
+
 #%%
 
 if not args.rms_check:
     if os.path.isfile('frequency_windows.yaml'):
         with open('frequency_windows.yaml') as file:
-            all_windows = yaml.safe_load(file)
+            windows_dict = yaml.safe_load(file)
     else:
         print('\nWarning: The file frequency_windows.yaml is missing. '
               + 'No frequency windows will be used.\n')
-        all_windows = []
+        windows_dict = []
+were_windows_updated = False
         
 rms_noises = {}
 frequency_ranges = {}
@@ -393,13 +638,45 @@ for file in args.file.split(','):
     reference_frequencies[file] = hdul[0].header['restfreq'] / 1e6
     # Reduction.
     if not args.rms_check:
-        windows = all_windows[file]
+        windows = windows_dict[file]
     else:
         windows = [[frequency[0], frequency[1]/10]]
     if args.smooth > len(frequency):
         args.smooth = len(frequency)
-    intensity_cont = reduce_curve(frequency, intensity, windows, args.smooth)
+    intensity_cont = fit_baseline(frequency, intensity, windows, args.smooth)
     intensity_red = intensity - intensity_cont
+    spectrum = {'frequency': frequency, 'intensity': intensity,
+                'baseline': intensity_cont}
+    
+    # Interactive check of windows.
+    selected_points = list(np.array(windows).flatten())
+    x_lims = [frequency.min(), frequency.max()]
+    y_lims = [intensity.min(), intensity.max()]
+    if args.check_windows:
+        plt.close('all')
+        print('Using manual check of windows.\n'
+              ' - Use Z/< and Left/Right to explore the spectrum region.\n'
+              ' - Left/Right click to add/remove a window edge.\n'
+              ' - Press Tab to remove all the windows.\n'
+              ' - Press Ctrl+Z / Ctrl+Shift+Z to undo/redo.\n'
+              ' - Press R / Shift+R to reduce the spectrum using the current windows.\n'
+              ' - Press Enter to accept the reduction and continue.\n')
+        ilog = 0
+        windows_copy = copy.copy(windows)
+        data = {'spectrum': spectrum, 'selected_points': selected_points}
+        data_log = [copy.deepcopy(data)]
+        fig = plot_data(spectrum)
+        fig.canvas.mpl_connect('button_press_event', click1)
+        fig.canvas.mpl_connect('button_release_event', click2)
+        fig.canvas.mpl_connect('key_press_event', press_key)
+        plt.show()  # interactive mode
+        intensity = spectrum['intensity']
+        windows = format_windows(selected_points)
+        were_windows_updated = True
+        if not np.array_equal(windows, windows_copy):
+            print('Updated windows for file {}.'.format(file))
+            windows = [[float(x1),float(x2)] for (x1,x2) in windows]
+            windows_dict[file] = windows
     
     # Noise.
     rms_noise = get_rms_noise(frequency, intensity_red, windows,
@@ -432,46 +709,12 @@ for file in args.file.split(','):
     
     gc.collect()
     
-    if not args.no_plots or args.save_plots:   
+    if not args.check_windows or args.save_plots:   
         
-        plt.figure(1, figsize=(10,7))
-        plt.clf()
-        plt.subplots_adjust(hspace=0, wspace=0)
-        
-        sp1 = plt.subplot(2,1,1)
-        plt.step(frequency, intensity, where='mid', color='black', ms=6)
-        if not args.rms_check:
-            for x1, x2 in windows:
-                plt.axvspan(x1, x2, color='gray', alpha=0.3)
-        plt.plot(frequency, intensity_cont, 'tab:green', label='fitted baseline')
-        plt.ticklabel_format(style='sci', useOffset=False)
-        plt.margins(x=0)
-        plt.xlabel('frequency (MHz)')
-        plt.ylabel('intensity (K)')
-        plt.legend(loc='upper right')
-        plt.tight_layout()
-    
-        plt.subplot(2,1,2, sharex=sp1)
-        plt.step(frequency, intensity_red, where='mid', color='black')
-        if not args.rms_check:
-            for x1, x2 in windows:
-                plt.axvspan(x1, x2, color='gray', alpha=0.3)
-        plt.ticklabel_format(style='sci', useOffset=False)
-        plt.margins(x=0)
-        plt.xlabel('frequency (MHz)')
-        plt.ylabel('reduced intensity (K)')
-        plt.tight_layout()
-
-        title = 'Full spectrum - {}'.format(file)
-        fontsize = max(7, 12 - 0.1*max(0, len(title) - 85))
-        plt.suptitle(title, fontsize=fontsize, fontweight='semibold')
-        plt.tight_layout(pad=0.7, h_pad=0.6, w_pad=0.1)
+        plot_data(spectrum)
 
         if args.save_plots:
-            if args.rms_check:
-                quality = 100
-            else:
-                quality = 200
+            quality = 100 if args.rms_check else 200
             os.chdir(original_folder)
             os.chdir(os.path.realpath(args.plots_folder))
             file_name = 'spectrum-{}.png'.format(file)
@@ -481,11 +724,6 @@ for file in args.file.split(','):
             os.chdir(original_folder)
             os.chdir(os.path.realpath(args.folder))       
             print("    Saved plot in {}{}.".format(args.plots_folder, file_name))
-        
-        if not args.no_plots:
-            plt.show()
-        else:
-            plt.close('all')
             
     print()
     gc.collect()
@@ -515,5 +753,10 @@ save_yaml_dict(resolutions, 'frequency_resolutions.yaml',
                default_flow_style=False)
 print('Saved frequency resolutions in {}frequency_resolutions.yaml.'
       .format(args.folder))
+
+# Export of the frequency windows of each spectrum.
+if args.check_windows and were_windows_updated:
+    save_yaml_dict(windows_dict, 'frequency_windows.yaml', default_flow_style=None)
+    print('Saved windows in {}frequency_windows.yaml.'.format(args.folder))
 
 print()

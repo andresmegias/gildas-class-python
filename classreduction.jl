@@ -3,7 +3,7 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Reduction mode
-Version 1.0
+Version 1.2
 
 Copyright (C) 2022 - Andrés Megías Toledano
 
@@ -266,10 +266,10 @@ function rolling_sigma_clip_args(x::Vector{Float64}, y::Vector{Float64};
     return cond
 end
 
-function reduce_curve(x::Vector{Float64}, y::Vector{Float64};
+function fit_baseline(x::Vector{Float64}, y::Vector{Float64};
                       windows::Matrix{Float64}, smooth_size::Int)
     """
-    Reduce the curve ignoring the specified windows.
+    Fit the baseline of the curve ignoring the specified windows.
 
     Parameters
     ----------
@@ -285,7 +285,7 @@ function reduce_curve(x::Vector{Float64}, y::Vector{Float64};
     Returns
     -------
     y3 : Array
-        Reduced array.
+        Baseline of the curve.
     """
     cond = regions_args(x, windows)
     x_ = x[cond]
@@ -355,7 +355,7 @@ function identify_lines(x::Vector{Float64}, y::Vector{Float64}; smooth_size::Int
         windows = get_windows(x, _cond, margin=1.5, width=line_width)
 
         if i < iters
-            y2 = reduce_curve(x, y, windows=windows, smooth_size=smooth_size)
+            y2 = fit_baseline(x, y, windows=windows, smooth_size=smooth_size)
         end
 
     end
@@ -622,7 +622,7 @@ for file in split(args["file"], ",")
     # Reduction.
     windows = all_windows[file]
     windows = Matrix(hcat(windows...)')
-    intensity_cont = reduce_curve(frequency, intensity, windows=windows,
+    intensity_cont = fit_baseline(frequency, intensity, windows=windows,
                                     smooth_size=args["smooth"])
     intensity_red = intensity .- intensity_cont
     # Noise.

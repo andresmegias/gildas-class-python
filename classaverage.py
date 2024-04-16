@@ -4,9 +4,9 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Averaging mode
-Version 1.1
+Version 1.2
 
-Copyright (C) 2022 - Andrés Megías Toledano
+Copyright (C) 2024 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software

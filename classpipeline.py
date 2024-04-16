@@ -4,7 +4,7 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Main script
-Version 1.1
+Version 1.2
 
 Copyright (C) 2022 - Andrés Megías Toledano
 
@@ -330,7 +330,7 @@ if 'ghost lines' in options:
                               **options['ghost lines']}
 else:
     options['ghost lines'] = default_options['ghost lines']
-show_plots = options['reduction']['show plots']
+check_windows = options['reduction']['check windows']
 save_plots = options['reduction']['save plots']
 line_width = str(options['reduction']['reference width'])
 smooth_factor = str(options['reduction']['smoothing factor'])
@@ -995,8 +995,8 @@ if args.rms_check:
                         arguments = ['python3'] + arguments
                         if args.using_windows_py:
                             arguments[0] = 'py'
-                    if not show_plots:
-                        arguments += ['--no_plots']
+                    if check_windows:
+                        arguments += ['--check_windows']
                     if save_plots:
                         arguments += ['--save_plots']
                     subprocess.run(arguments)
@@ -1271,8 +1271,7 @@ if args.rms_check:
     plt.close('all')                 
     print()
 
-#%% Running of the script that identifies the more visible lines and creates
-#   the class files for reduction.
+#%% Running of the script that identifies the more visible lines automatically.
 
 if args.line_search:
     print('\nStarting line search.\n')
@@ -1298,8 +1297,6 @@ if args.line_search:
             arguments = ['python3'] + arguments
             if args.using_windows_py:
                 arguments[0] = 'py'
-    if not show_plots:
-        arguments += ['--no_plots']
     if save_plots:
         arguments += ['--save_plots']
     if rolling_sigma_clip:
@@ -1314,6 +1311,8 @@ if args.reduction:
     print('\nStarting reduction.\n')
     os.chdir(config_folder)
     files_folder = exporting_folder
+    if check_windows:
+        args.use_julia = False
     if args.use_julia:
         arguments = ['classreduction.jl', files_folder, ','.join(all_spectra),
                      '--plots_folder', plots_folder,
@@ -1335,8 +1334,8 @@ if args.reduction:
             arguments = ['python3'] + arguments
             if args.using_windows_py:
                 arguments[0] = 'py'
-    if not show_plots or (args.line_search and args.reduction):
-        arguments += ['--no_plots']
+    if check_windows:
+        arguments += ['--check_windows']
     if save_plots and not (args.line_search and args.reduction):
         arguments += ['--save_plots']
         

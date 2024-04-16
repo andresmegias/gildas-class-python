@@ -4,9 +4,9 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Line search mode
-Version 1.0
+Version 1.2
 
-Copyright (C) 2022 - Andrés Megías Toledano
+Copyright (C) 2024 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -91,7 +91,7 @@ def get_windows(x, cond, margin=0.0, width=10.0):
     inds = np.append(all_inds[cond1], all_inds[cond2])
     inds = np.sort(inds).reshape(-1,2)
     windows = x[inds]
-    for i, window in enumerate(windows):
+    for (i, window) in enumerate(windows):
         center = np.mean(window)
         semiwidth = (window[1] - window[0]) / 2
         semiwidth = max(3*reference, semiwidth, 0.1*width*reference)
@@ -131,29 +131,6 @@ def regions_args(x, wins):
         cond *= (x < x1) + (x > x2)
     return cond
 
-def rolling_window(y, window):
-    """
-    Group the input data according to the specified window size.
-    
-    Function by Erik Rigtorp.
-
-    Parameters
-    ----------
-    y : array
-        Input data.
-    window : int
-        Size of the windows to group the data.
-
-    Returns
-    -------
-    y2
-        Output array.
-    """
-    shape = y.shape[:-1] + (y.shape[-1] - window + 1, window)
-    strides = y.strides + (y.strides[-1],)
-    y_w = np.lib.stride_tricks.as_strided(y, shape=shape, strides=strides)
-    return y_w
-
 def rolling_function(func, y, size, **kwargs):
     """
     Apply a function in a rolling way, in windows of the specified size.
@@ -174,7 +151,19 @@ def rolling_function(func, y, size, **kwargs):
     y_f : array
         Resultant array.
     """
-    min_size = 3
+    
+    def rolling_window(y, window):
+        """
+        Group the input data according to the specified window size.
+        
+        Function by Erik Rigtorp.
+        """
+        shape = y.shape[:-1] + (y.shape[-1] - window + 1, window)
+        strides = y.strides + (y.strides[-1],)
+        y_w = np.lib.stride_tricks.as_strided(y, shape=shape, strides=strides)
+        return y_w
+    
+    min_size = 1
     size = int(size) + (int(size) + 1) % 2
     size = max(min_size, size)
     N = len(y)
@@ -217,7 +206,7 @@ def rolling_sigma_clip_args(x, y, smooth_size, sigmas=6.0, iters=2):
     abs_y = abs(y)
     for i in range(iters):
         rolling_mad = rolling_function(median_abs_deviation, abs_y[cond],
-                                       size=2*smooth_size, scale='normal')
+                                       size=smooth_size, scale='normal')
         rolling_mad = np.interp(x, x[cond], rolling_mad)
 
         cond *= np.less(abs_y, sigmas*rolling_mad)
@@ -244,12 +233,13 @@ def sigma_clip_args(y, sigmas=6.0, iters=2):
     cond = np.ones(len(y), dtype=bool)
     abs_y = abs(y)
     for i in range(iters):
-        cond *= abs_y < sigmas*median_abs_deviation(abs_y[cond], scale='normal')
+        mad = median_abs_deviation(abs_y[cond], scale='normal')
+        cond *= abs_y < sigmas*mad
     return cond
 
-def reduce_curve(x, y, windows, smooth_size):
+def fit_baseline(x, y, windows, smooth_size):
     """
-    Reduce the curve ignoring the specified windows.
+    Fit the baseline of the curve ignoring the specified windows.
 
     Parameters
     ----------
@@ -265,7 +255,7 @@ def reduce_curve(x, y, windows, smooth_size):
     Returns
     -------
     y3 : array
-        Reduced array.
+        Baseline of the curve.
     """
     
     cond = regions_args(x, windows)
@@ -321,13 +311,14 @@ def identify_lines(x, y, smooth_size, line_width, sigmas, iters=2,
     for i in range(iters):
  
         if rolling_sigma_clip:
-            cond = rolling_sigma_clip_args(x, y-y2, smooth_size, sigmas, iters=2)
+            cond = rolling_sigma_clip_args(x, y-y2, 2*smooth_size, sigmas,
+                                           iters=2)
         else:
             cond = sigma_clip_args(y-y2, sigmas=sigmas, iters=2)
         windows = get_windows(x, ~cond, margin=1.5, width=line_width)
         
         if i+1 < iters:
-            y3 = reduce_curve(x, y, windows, smooth_size)  
+            y3 = fit_baseline(x, y, windows, smooth_size)  
             y2 = y3
         
     return windows
@@ -404,8 +395,8 @@ parser.add_argument('-width', default=6, type=int)
 parser.add_argument('-threshold', default=6., type=float)
 parser.add_argument('-plots_folder', default='plots', type=str)
 parser.add_argument('--rolling_sigma', action='store_true')
-parser.add_argument('--no_plots', action='store_true')
 parser.add_argument('--save_plots', action='store_true')
+parser.add_argument('--check_windows', action='store_true')
 args = parser.parse_args()
 original_folder = full_path(os.getcwd())
 os.chdir(full_path(args.folder))
@@ -422,11 +413,10 @@ for file in args.file.split(','):
     frequency, intensity, _ = load_spectrum(file)
 
     # Identification of the lines and reduction of the spectrum.
-    windows = \
-        identify_lines(frequency, intensity, smooth_size=args.smooth,
+    windows = identify_lines(frequency, intensity, smooth_size=args.smooth,
                        line_width=args.width, sigmas=args.threshold, iters=2,
                        rolling_sigma_clip=args.rolling_sigma)
-    intensity_cont = reduce_curve(frequency, intensity, windows, args.smooth)
+    intensity_cont = fit_baseline(frequency, intensity, windows, args.smooth)
     intensity_red = intensity - intensity_cont
     
     # Windows.
@@ -442,7 +432,7 @@ for file in args.file.split(','):
         
     #%% Plots.
     
-    if not args.no_plots or args.save_plots:   
+    if args.save_plots:   
         
         fig = plt.figure(1, figsize=(10,7))
         plt.clf()
@@ -525,18 +515,13 @@ for file in args.file.split(','):
             print()
             os.chdir(original_folder)
             os.chdir(full_path(args.folder))
-        
-        # Show plots.
-        if not args.no_plots:
-            plt.show()
-        else:
-            plt.close('all')
+
+        plt.close('all')
             
     gc.collect()
     
 # Export of the frequency windows of each spectrum.
-save_yaml_dict(windows_dict, 'frequency_windows.yaml',
-                  default_flow_style=None)
+save_yaml_dict(windows_dict, 'frequency_windows.yaml', default_flow_style=None)
 print('Saved windows in {}frequency_windows.yaml.'.format(args.folder))
 
 print()
