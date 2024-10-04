@@ -4,7 +4,7 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Main script
-Version 1.2
+Version 1.3
 
 Copyright (C) 2022 - Andrés Megías Toledano
 
@@ -27,6 +27,7 @@ import sys
 import glob
 import copy
 import time
+import shutil
 import platform
 import argparse
 import subprocess
@@ -172,7 +173,7 @@ def ticks_format(value, index):
     else:
         return '${0:d}\\times10^{{{1:d}}}$'.format(int(base), int(exp))
 
-def common_elements(lists):
+def default_elements(lists):
     """
     Return the common elements for the given lists of elements.
 
@@ -183,14 +184,14 @@ def common_elements(lists):
 
     Returns
     -------
-    common_els : list
+    default_els : list
         List of the common elements.
     """
-    common_els = set(lists[0])
+    default_els = set(lists[0])
     for i in range(len(lists)-1):
-        common_els = common_els.intersection(lists[i+1])
-    common_els = list(common_els)
-    return common_els
+        default_els = default_els.intersection(lists[i+1])
+    default_els = list(default_els)
+    return default_els
 
 #%%
 
@@ -208,8 +209,8 @@ parser.add_argument('--check_rms_plots', action='store_true')
 parser.add_argument('--selection', action='store_true')
 parser.add_argument('--line_search', action='store_true')
 parser.add_argument('--reduction', action='store_true')
-parser.add_argument('--average', action='store_true')
-parser.add_argument('--combine', action='store_true')
+parser.add_argument('--merging', action='store_true')
+parser.add_argument('--averaging', action='store_true')
 parser.add_argument('--spectra_tables', action='store_true')
 parser.add_argument('--use_julia', action='store_true')
 parser.add_argument('--using_windows_py', action='store_true')
@@ -230,19 +231,22 @@ default_options = {
     'plots folder': 'plots',
     'input files': [],
     'bad scans': [],
-    'common telescopes': ['*'],
+    'default telescopes': ['*'],
     'observatory': '',
     'telescope efficiencies': {},
     'frequency units': 'MHz',
     'weighting mode': 'time',
-    'fold': False,
-    'combine all': True,
+    'line frequencies (MHz)': {},
+    'radial velocities (km/s)': {},
+    'new source names': {},
+    'fold spectra': False,
+    'average all input files': True,
     'use only daily bad scans': False,
     'check Doppler corrections': True,
     'only rms noise plots': False,
     'extra note': '',
     'reduction': {
-        'show plots': False,
+        'check windows': False,
         'save plots': False,
         'rolling sigma clip': False,
         'reference width': 14,
@@ -256,6 +260,7 @@ default_options = {
         'relative intensity threshold': 0.3,
         'smoothing factor': 40
         },
+    'merging': 'auto',
     'only rms plots': False
     }
 
@@ -266,8 +271,8 @@ default_rms_opts = {
     }
 
 # Initial check.
-if not (args.selection or args.line_search or args.reduction or args.average
-        or args.combine or args.spectra_tables or args.rms_check
+if not (args.selection or args.line_search or args.reduction or args.merging
+        or args.averaging or args.spectra_tables or args.rms_check
         or args.check_rms_plots):
     raise Exception('No processing mode is selected.')
 
@@ -298,14 +303,13 @@ if config_folder == '':
     config_folder = '.'
 os.chdir(config_folder)
 
-
 # Reading of the variables.
 data_folder = options['data folder']
 input_files = options['input files']
 exporting_folder = options['exporting folder']
 output_folder = options['output folder']
 plots_folder = options['plots folder']
-common_telescopes = options['common telescopes']
+default_telescopes = options['default telescopes']
 observatory = options['observatory']
 bad_scans = options['bad scans']
 telescope_effs = options['telescope efficiencies']
@@ -313,9 +317,12 @@ modify_beam_eff = len(telescope_effs) != 0
 if modify_beam_eff and 'beam efficiency' in telescope_effs:
     telescope_effs = {'default': telescope_effs}
 frequency_units = options['frequency units']
+line_frequencies = options['line frequencies (MHz)']
+radial_velocities = options['radial velocities (km/s)']
+new_source_names = options['new source names']
 weight_mode = options['weighting mode']
-fold = options['fold']
-combine_all = options['combine all']
+fold_spectra = options['fold spectra']
+average_all_input_files = options['average all input files']
 only_daily_bad_scans = options['use only daily bad scans']
 check_doppler_corrections = options['check Doppler corrections']
 only_rms_plots = options['only rms noise plots']
@@ -325,11 +332,11 @@ if 'reduction' in options:
                             **options['reduction']}
 else:
     options['reduction'] = default_options['reduction']
-if 'ghost lines' in options:
-    options['ghost lines'] = {**default_options['ghost lines'],
-                              **options['ghost lines']}
-else:
-    options['ghost lines'] = default_options['ghost lines']
+if 'averaging' in options and 'ghost lines' in options['averaging']:
+    options['averaging']['ghost lines'] = {**default_options['ghost lines'],
+                                           **options['averaging']['ghost lines']}
+elif 'averaging' in options:
+    options['averaging']['ghost lines'] = default_options['ghost lines']
 check_windows = options['reduction']['check windows']
 save_plots = options['reduction']['save plots']
 line_width = str(options['reduction']['reference width'])
@@ -381,12 +388,12 @@ for file in input_files:
                         .format(file))
     else:
         sources = input_files[file]['sources-lines-telescopes']
-        for source, lines in zip(sources, sources.values()):
+        for (source, lines) in zip(sources, sources.values()):
             for line, telescopes in zip(lines, lines.values()):
-                if telescopes == 'common':
+                if telescopes == 'default':
                     (input_files[file]['sources-lines-telescopes'][source]
-                     [line]) = common_telescopes
-    if not combine_all:
+                     [line]) = default_telescopes
+    if not average_all_input_files:
         if not 'note' in input_files[file]:
             raise Exception('There is no note for file {}.'.format(file))
         elif len(input_files[file]['note']) == 0:
@@ -403,7 +410,7 @@ if not os.path.isdir(full_path(plots_folder)):
     os.makedirs(full_path(plots_folder))
 
 
-#%% Creation of the first class file for data selection.
+#%% Selection mode.
 
 # Initialization of variables.
 output_files = []
@@ -415,7 +422,7 @@ for file in input_files:
     script += ['file in ' + data_folder + file]
     script += ['set weight ' + weight_mode]
     ext = '.' + file.split('.')[-1]
-    if not combine_all:
+    if not average_all_input_files:
         note = input_files[file]['note']
     # Loop for ignoring the bad scans.
     bad_scans_i = []
@@ -427,15 +434,17 @@ for file in input_files:
         script += ['ignore /scan {}'.format(scan)]
     # Loop for sources.
     sources = input_files[file]['sources-lines-telescopes']
-    for source, lines in zip(sources, sources.values()):
+    for (source, lines) in zip(sources, sources.values()):
         script += ['set source ' + source]
         # Loop for lines.
-        for line, telescopes in zip(lines, lines.values()):
+        for (line, telescopes) in zip(lines, lines.values()):
             observations = []
             script += ['set line ' + line]
             # Name of the output files.
-            output_file = '-'.join([source, line.replace('*',''), extra_note])
-            if not combine_all:
+            output_file = '-'.join([source, line.replace('*','')])
+            if len(extra_note) > 0:
+                output_file += '-' + extra_note
+            if not average_all_input_files:
                 output_file = '-'.join([output_file, note])
             output_file = (output_file + ext).replace('-'+ext, ext)
             # Definition of the output file.
@@ -457,16 +466,24 @@ for file in input_files:
                     script += ['ignore /scan {}'.format(scan)]
                 # Average.
                 script += ['find /all', 'list', 'stitch']
-                if fold:
+                if fold_spectra:
                     script += ['fold']
+                if line in line_frequencies and telescope in line_frequencies[line]:
+                    script += ['modify frequency {}'
+                               .format(line_frequencies[line][telescope])]
                 if '*' in line:
                     script += ['modify line {}'.format(line.replace('*',''))]
+                if source in radial_velocities:
+                    script += ['modify velocity {}'.format(radial_velocities[source])]
+                if source in new_source_names:
+                    script += ['modify source {}'
+                               .format(new_source_names[source].upper())]
                 script += ['write'] 
                 output_obs = '-'.join([source, line.replace('*','')])
-                if not combine_all:
+                if not average_all_input_files:
                     output_obs = '-'.join([output_obs, note])
                 output_obs = ('-'.join([output_obs, telescope.replace('*','')]))
-                if not combine_all:
+                if not average_all_input_files:
                     script += ['greg ' + exporting_folder + output_obs + '.dat'
                              + ' /formatted']
                     output_obs_fits = output_obs + '.fits'
@@ -483,8 +500,7 @@ for file in input_files:
                 output_spectra[output_file] += observations
                 output_telescopes[output_file] += telescopes
         
-# Removing repeated elements from the output files list and combining all the
-# spectra.
+# Removing repeated elements from output files list and combining all spectra.
 all_spectra = []
 output_files = list(np.unique(output_files))
 for file in output_files:
@@ -495,15 +511,15 @@ for file in output_files:
 if args.selection:
 
     # Combining observations coming from different files.
-    if combine_all and len(input_files) >= 1:
+    if average_all_input_files and len(input_files) >= 1:
         for file in output_files:
             script += ['file in ' + output_folder + file]
             ext = '.' + file.split('.')[-1]
             script += ['file out ' + output_folder
                      + file.replace(ext, '-temp'+ext) + ' m /overwrite']
             script += ['set source *', 'set line *']
-            for spectrum, telescope in zip(output_spectra[file],
-                                           output_telescopes[file]):
+            for (spectrum, telescope) in zip(output_spectra[file],
+                                             output_telescopes[file]):
                 script += ['set telescope ' + telescope]
                 script += ['find /all', 'list', 'stitch', 'write']
                 script += ['greg ' + exporting_folder + spectrum + '.dat'
@@ -514,34 +530,46 @@ if args.selection:
                 script += ['fits write {} /mode spectrum'
                           .format(exporting_folder + spectrum_fits)]
                 
-    # Creating Class files for each spectrum.
+    # Creating CLASS files for each spectrum.
     script += ['set source *', 'set line *', 'set telescope *']
     all_subfolder = 'all' + separator
     for file in output_files:
         script += ['file in {}/{}'.format(output_folder, file)]
         script += ['find /all']
         for spectrum in output_spectra[file]:
-            script += ['get next']
             script += ['file out {}{}{} m /overwrite'
-                     .format(output_folder, all_subfolder, spectrum + ext)]
-            script += ['write']   
+                       .format(output_folder, all_subfolder, spectrum + ext)]
+            telescope = spectrum.split('-')[-1]
+            script += ['set telescope ' + '*'+telescope+'*']
+            script += ['find /all', 'get first']
+            script += ['write']
+            if not average_all_input_files:
+                # print(spectrum)
+                # input()
+                i = 3 if spectrum.split('-')[1][0].isdigit() else 2
+                note = '-'.join(spectrum.split('-')[i:-1])
+                spectrum = spectrum.replace('-'+note+'-','-') + '-'+note
+                script += ['file out {}{}{} m /overwrite'
+                           .format(output_folder, all_subfolder, spectrum + ext)]
+                # print(script[-1])
+                # input()
+                script += ['write']
     
     # End of the script.
     script += ['exit']
-    for i in range(len(script) - 1):
-        script[i] += '\n'
+    script = [line + '\n' for line in script]
  
     # Writing of the first class file.
     with open('selection.class', 'w') as file:
         file.writelines(script)
 
-#%% Running of the first class file.
+# Running of the first class file.
     
     print('\nStarting selection.\n')
 
     subprocess.run(['class', '@selection.class'])
     
-    if combine_all:
+    if average_all_input_files:
         for file in output_files:
             ext = '.' + file.split('.')[-1]
             original_name = output_folder + file.replace(ext,'-temp'+ext)
@@ -550,7 +578,7 @@ if args.selection:
                 os.remove(new_name)
             os.rename(original_name, new_name)
         
-#%% Creation of a class file for checking the Doppler corrections.
+# Creation of a class file for checking the Doppler corrections.
     
     script = []
     # Showing the Doppler corrections.
@@ -564,14 +592,13 @@ if args.selection:
 
     # End of the script.
     script += ['exit']
-    for i in range(len(script) - 1):
-        script[i] += '\n'
+    sript = [line + '\n' for line in script]
  
     # Writing of the first class file.
     with open('selection-doppler.class', 'w') as file:
         file.writelines(script)
 
-#%% Running of the class file for checking the Doppler corrections.
+# Running of the class file for checking the Doppler corrections.
 
     if check_doppler_corrections:
         
@@ -607,8 +634,10 @@ if args.selection:
     # Export of the Doppler corrections of each spectrum.
     save_yaml_dict(doppler_corr, './' + exporting_folder
                    + 'doppler_corrections.yaml', default_flow_style=False)
+    print('\nSaved Doppler corrections in {}doppler_corrections.yaml.'
+          .format(exporting_folder))
 
-#%% Creation of a final file.
+# Creation of a final file.
 
     script = []
     sources = []
@@ -629,29 +658,28 @@ if args.selection:
         # Loop for observations of each file.
         for spectrum in output_spectra[file]:
             script += ['get next', 'write']
+        file_name = output_folder + file
+        shutil.copyfile(file_name, file_name.replace(output_folder,
+                                                output_folder + all_subfolder))
             
     # End of the script.
     script += ['exit']
-    for i in range(len(script) - 1):
-        script[i] += '\n'
+    script = [line + '\n' for line in script]
         
     # Writing of the class file.
-    with open('grouping.class', 'w') as file:
+    with open('selection-grouping.class', 'w') as file:
         file.writelines(script)
         
     # Running of the class file.
-    subprocess.run(['class', '@grouping.class'])
+    subprocess.run(['class', '@selection-grouping.class'])
     
-    print('\nSaved Doppler corrections in {}doppler_corrections.yaml.'
-          .format(exporting_folder))
     print('\nCreated CLASS files:    (folder {})'.format(output_folder))
     for file in output_files:
         print('- ' + file)
     print()
 
 
-
-#%% Noise checking.
+#%% RMS check mode, calculations.
 
 if args.rms_check:
     
@@ -733,7 +761,7 @@ if args.rms_check:
                             script += ['ignore /scan {}'.format(scan)]
                         # List of observations.
                         script += ['find /all', 'list'] 
-                        if fold:
+                        if fold_spectra:
                             script += ['fold']
                         script += ['set mode x {} {}'
                                  .format(*rms_freq_range)]
@@ -744,8 +772,7 @@ if args.rms_check:
                     
                     # End of the script.
                     script += ['exit']
-                    for i in range(len(script) - 1):
-                        script[i] += '\n'
+                    script = [line + '\n' for line in script]
                  
                     # Writing of the class file.
                     with open('rms_check.class', 'w') as file:
@@ -762,13 +789,12 @@ if args.rms_check:
                     script += ['file in ' + output_file_all]
                     script += ['find /all', 'list']
                     script += ['exit']
-                    for i in range(len(script) - 1):
-                        script[i] += '\n'
+                    script = [line + '\n' for line in script]
                     
-                    with open('rms_check.class', 'w') as file:
+                    with open('rms_check-info.class', 'w') as file:
                         file.writelines(script)   
                         
-                    p = subprocess.Popen(['class', '@rms_check.class'],
+                    p = subprocess.Popen(['class', '@rms_check-info.class'],
                                          stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT)
                     rms_id = {}
@@ -864,13 +890,12 @@ if args.rms_check:
                             script += ['modify doppler', 'modify doppler *']
                         
                     script += ['exit']
-                    for i in range(len(script) - 1):
-                        script[i] += '\n'
+                    script = [line + '\n' for line in script]
                         
-                    with open('rms_check.class', 'w') as file:
+                    with open('rms_check-ind.class', 'w') as file:
                         file.writelines(script)
                         
-                    p = subprocess.Popen(['class', '@rms_check.class'],
+                    p = subprocess.Popen(['class', '@rms_check-ind.class'],
                                          stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT)
                     
@@ -934,13 +959,12 @@ if args.rms_check:
                             script += ['modify doppler', 'modify doppler *']
                         
                     script += ['exit']
-                    for i in range(len(script) - 1):
-                        script[i] += '\n'
+                    script = [line + '\n' for line in script]
                         
-                    with open('rms_check.class', 'w') as file:
+                    with open('rms_check-cum.class', 'w') as file:
                         file.writelines(script)
                         
-                    p = subprocess.Popen(['class', '@rms_check.class'],
+                    p = subprocess.Popen(['class', '@rms_check-cum.class'],
                                          stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT)
                     
@@ -1145,10 +1169,8 @@ if args.rms_check:
                                fontsize=fontsize)
                     plt.yscale('log')
                     plt.tick_params(right=True, which='both')
-                    plt.gca().yaxis.set_minor_formatter(
-                        FuncFormatter(ticks_format))
-                    plt.gca().yaxis.set_major_formatter(
-                        FuncFormatter(ticks_format))
+                    plt.gca().yaxis.set_minor_formatter(FuncFormatter(ticks_format))
+                    plt.gca().yaxis.set_major_formatter(FuncFormatter(ticks_format))
                     plt.xlabel('observations averaged')
                     plt.ylabel('RMS noise (mK)')
                     plt.title(title, fontweight='bold')
@@ -1271,7 +1293,7 @@ if args.rms_check:
     plt.close('all')                 
     print()
 
-#%% Running of the script that identifies the more visible lines automatically.
+#%% Line search mode.
 
 if args.line_search:
     print('\nStarting line search.\n')
@@ -1304,7 +1326,7 @@ if args.line_search:
         
     subprocess.run(arguments)
 
-#%% Running of the script that normalizes the spectra.
+#%% Reduction mode.
 
 if args.reduction:
     
@@ -1341,13 +1363,15 @@ if args.reduction:
         
     subprocess.run(arguments)
 
-#%% Grouping of the files in the original file format and calibration.
+# Grouping of the files in the original file format and calibration.
  
     os.chdir(config_folder)
     script = []
     
     with open(exporting_folder + 'doppler_corrections.yaml') as file:
         doppler_corr = yaml.safe_load(file)
+    # with open(exporting_folder + 'frequency_windows.yaml') as file:
+    #     frequency_windows = yaml.safe_load(file)
     
     if modify_beam_eff:
         with open(exporting_folder + 'frequency_ranges.yaml') as file:
@@ -1359,12 +1383,16 @@ if args.reduction:
     final_files = []
     for red_file in output_files:
         final_files += [red_file.replace(ext, '-r' + ext)]
-    for file, red_file in zip(output_files, final_files):
+    for (file, red_file) in zip(output_files, final_files):
         script += ['file out ' + output_folder + red_file + ' m /overwrite']
+        # mean_freqs, noises, windows = [], [], []
         for spectrum in output_spectra[file]:
             script += ['fits read ' + exporting_folder + spectrum + '-r.fits']
             if modify_beam_eff:
                 mean_freq = np.mean(frequency_ranges[spectrum]) * to_GHz
+                noise = rms_noises[spectrum]
+                # windows += [frequency_windows[spectrum]]
+                # mean_freqs += [mean_freq]
                 keys = list(telescope_effs.keys())
                 if keys == ['default']:
                     key = keys[0]
@@ -1376,8 +1404,7 @@ if args.reduction:
                             if not '*' in key_i and key_i == telescope:
                                 key = key_i
                                 break
-                            elif ('*' in key_i and
-                                  key_i.replace('*','') in telescope):
+                            elif '*' in key_i and key_i.replace('*','') in telescope:
                                 key = key_i
                                 break
                 if not key in telescope_effs:
@@ -1390,6 +1417,44 @@ if args.reduction:
                 beam_effs[str(spectrum)] = float(beam_eff)
             script += ['modify doppler ' + doppler_corr[spectrum]]
             script += ['write']
+            # noises += [noise]
+        # script += ['file in ' + output_folder + red_file]
+        # script += ['find /all']
+        # if modify_beam_eff:
+        #     script += ['file out ' + output_folder
+        #                + red_file.replace(ext, '-temp'+ext) + ' m /overwrite']
+        #     beam_eff = np.interp(np.mean(mean_freqs),
+        #                          telescope_effs[key]['frequency (GHz)'],
+        #                          telescope_effs[key]['beam efficiency'])
+        #     script += ['get first']
+        #     script += ['modify beam_eff {}'.format(round(beam_eff,2))]
+        #     script += ['write']
+        #     for i in range(len(output_spectra[file])-1):
+        #         script += ['get next']
+        #         script += ['modify beam_eff {}'.format(round(beam_eff,2))]
+        #         script += ['write']
+        #     script += ['file in ' + output_folder
+        #                + red_file.replace(ext, '-temp'+ext)]
+        #     script += ['find /all']
+        # script += ['stitch']
+        # file_name = red_file.replace(ext, '.dat')
+        # script += ['greg ' + exporting_folder + file_name + ' /formatted']
+        # file_name = file_name.replace('.dat', '.fits')
+        # if os.path.isfile(exporting_folder + file_name):
+        #     os.remove(exporting_folder + file_name)
+        # script += ['fits write {} /mode spectrum'
+        #           .format(exporting_folder + file_name)]
+        # spectrum = red_file.replace('-r'+ext, '')
+        # windows = np.concatenate(tuple(windows), axis=0)
+        # windows = [[float(x1),float(x2)] for (x1,x2) in windows]
+        # frequency_windows[spectrum] = list(windows)
+        # beam_effs[str(spectrum)] = float(beam_eff)
+        # rms_noises[spectrum] = float(np.mean(noises))
+        
+    # save_yaml_dict(frequency_windows, exporting_folder + 'frequency_windows.yaml',
+    #                default_flow_style=False)
+    # print('Saved updated frequency windows in {}frequency_windows.yaml.'
+    #       .format(exporting_folder))
             
     if modify_beam_eff:
         
@@ -1405,16 +1470,15 @@ if args.reduction:
     
     # End of the script.
     script += ['exit']
-    for i in range(len(script) - 1):
-        script[i] += '\n'
+    script += [line + '\n' for line in script]
     # Writing of the class file.
-    with open('grouping.class', 'w') as file:
+    with open('reduction-grouping-1.class', 'w') as file:
         file.writelines(script)
         
     # Running of the class file.
-    subprocess.run(['class', '@grouping.class'])
+    subprocess.run(['class', '@reduction-grouping-1.class'])
         
-#%% Creation of a final file.
+# Creation of a final file.
 
     script = []
     final_files = []
@@ -1428,7 +1492,7 @@ if args.reduction:
         file_name = file_name.replace('--','-')
         script += ['file out ' + file_name + ' m /overwrite']
     # Loop for files created in the data selection. 
-    for file, red_file, source in zip(output_files, final_files, sources):
+    for (file, red_file, source) in zip(output_files, final_files, sources):
         script += ['file in ' + output_folder + red_file]
         file_name = output_folder + source + '-' + extra_note + '-all-r' + ext
         file_name = file_name.replace('--','-')
@@ -1440,87 +1504,49 @@ if args.reduction:
             
     # End of the script.
     script += ['exit']
-    for i in range(len(script) - 1):
-        script[i] += '\n'
+    script = [line + '\n' for line in script]
     # Writing of the class file.
-    with open('grouping.class', 'w') as file:
+    with open('reduction-grouping-2.class', 'w') as file:
         file.writelines(script)
         
     # Running of the class file.
-    subprocess.run(['class', '@grouping.class'])
+    subprocess.run(['class', '@reduction-grouping-2.class'])
     
     print('\nCreated CLASS files:    (folder {})'.format(output_folder))
     for file in output_files:
         print('- ' + file.replace(ext, '-r'+ext))
     print()
 
-#%% Generation of the configuration file for averaging the spectra.
+#%% Averaging mode.
 
-sources = []
+sources, lines = [], []
 for file in output_files:
     sources += [file.split('-')[0]]
+    lines += [file.split('-')[1]]
 
-if args.average:
+if args.averaging:
     
-    if not combine_all:
-        raise Exception("Average mode can only be used with the 'combine all'"
-                        + " option in the configuration file.\n")
-    
-    with open(exporting_folder + 'frequency_ranges.yaml') as file:
-        frequency_ranges = yaml.safe_load(file)
+    print('\nStarting averaging mode.\n')
 
-    config_average = {}
-    config_average['extra note'] = extra_note
-    config_average['spectra folder'] = exporting_folder
-    config_average['output folder'] = output_folder
-    config_average['plots folder'] = plots_folder
+    config_averaging = {}
+    config_averaging['extra note'] = extra_note
+    config_averaging['spectra folder'] = exporting_folder
+    config_averaging['output folder'] = output_folder
+    config_averaging['plots folder'] = plots_folder
+    config_averaging['class extension'] = ext
+    config_averaging['ghost lines'] = options['averaging']['ghost lines']
+    config_averaging['averaged spectra'] = options['averaging']['averaged spectra']
+    if 'sources-lines-telescopes' in options['averaging']:
+        config_averaging['sources-lines-telescopes'] = \
+            options['averaging']['sources-lines-telescopes']
+    config_averaging['default telescopes'] = options['default telescopes']
     
-    config_average['input files'] = {}
-    for source in list(np.unique(sources)):
-        all_spectra = []
-        averaged_spectra = []
-        ranges = []
-        names = []
-        for file in output_files:
-            for spectrum in output_spectra[file]:
-                if spectrum.startswith(source+'-'):
-                    all_spectra += ['-'.join(spectrum.split('-')[1:])]
-                    names += [spectrum]
-                    ranges += [frequency_ranges[spectrum]]
-        ranges = np.array(ranges)
-        names = np.array(names)
-        inds = np.argsort(ranges[:,1])
-        ranges = ranges[inds,:]
-        names = list(names[inds])
-        i = 0
-        while i < len(ranges) - 1:
-            difference = ranges[i+1,0] - ranges[i,1]
-            if difference < 0:
-                ranges[i,0] = min(ranges[i,0], ranges[i+1,0])
-                ranges[i,1] = max(ranges[i,1], ranges[i+1,1])
-                ranges = np.delete(ranges, i+1, axis=0)
-                names[i] += ',' + names[i+1]
-                names.pop(i+1)
-            else:
-                i += 1
-        for spectra_group in names:
-            if len(spectra_group.split(',')) > 1:
-                averaged_spectra += [spectra_group.split(',')]
-                for i, spectrum in enumerate(averaged_spectra[-1]):
-                    averaged_spectra[-1][i] = spectrum.replace(source+'-','')
-        file_name = source + '-' + extra_note + '-all-r' + ext
-        file_name = file_name.replace('--','-')
-        config_average['input files'][file_name] = {}
-        config_average['input files'][file_name]['all spectra'] = all_spectra
-        config_average['input files'][file_name]['averaged spectra'] = \
-            averaged_spectra
-
-    save_yaml_dict(config_average, 'config-average-auto.yaml',
-                   default_flow_style=False)
+    save_yaml_dict(config_averaging, 'config-averaging-auto.yaml',
+                   default_flow_style=None)
         
     # Running of the script that joints the overlapping spectra.
     os.chdir(original_folder)
-    arguments = ['classaverage.py', config_folder +'/config-average-auto.yaml']
+    arguments = ['classaveraging.py', config_folder +'/config-averaging-auto.yaml']
     if local_run:
         arguments[0] = codes_folder + arguments[0]
         arguments = ['python3'] + arguments
@@ -1528,54 +1554,39 @@ if args.average:
             arguments[0] = 'py'
     subprocess.run(arguments)
 
-#%% Generation of the configuration file for combining the spectra.
+#%% Merging mode.
 
-sources, lines = [], []
+sources = []
 for file in output_files:
     sources += [file.split('-')[0]]
-    lines += [file.split('-')[1]]
 
-if args.combine:
+if args.merging:
     
-    print('\nStarting combine mode.\n')
+    if not average_all_input_files:
+        raise Exception("Merging mode can only be used with the"
+            "'average all input files' option in the configuration file.\n")
     
     with open(exporting_folder + 'frequency_ranges.yaml') as file:
         frequency_ranges = yaml.safe_load(file)
 
-    config_combine = {}
-    config_combine['extra note'] = extra_note
-    config_combine['spectra folder'] = exporting_folder
-    config_combine['output folder'] = output_folder
-    config_combine['plots folder'] = plots_folder
-    config_combine['class extension'] = ext
-    config_combine['ghost lines'] = options['ghost lines']
-    config_combine['files'] = {}
+    config_merging = {}
+    config_merging['extra note'] = extra_note
+    config_merging['spectra folder'] = exporting_folder
+    config_merging['output folder'] = output_folder
+    config_merging['plots folder'] = plots_folder
+    config_merging['input files'] = options['merging']
     
-    if not combine_all:
-        
+    if options['merging'] == 'auto':
+        config_merging['input files'] = {}
         for source in list(np.unique(sources)):
-            for line in list(np.unique(lines)):
-                final_name = '{}-{}-{}'.format(source, line, extra_note)
-                config_combine['files'][final_name] = {}
-                for file in output_files:
-                    note = '-'.join(file.split('-')[-3:]).replace(ext,'')
-                    for spectrum in output_spectra[file]:
-                        if spectrum.startswith('{}-{}'.format(source, line)):
-                            if not note in config_combine['files'][final_name]:
-                                config_combine['files'][final_name][note] = []
-                            config_combine['files'][final_name][note] += \
-                                [spectrum.split('-')[-1]]
-    
-    else:
-    
-        all_spectra = {}
-        for source in list(np.unique(sources)):
-            all_spectra[source] = []
+            all_spectra = []
+            averaged_spectra = []
             ranges = []
             names = []
             for file in output_files:
                 for spectrum in output_spectra[file]:
                     if spectrum.startswith(source+'-'):
+                        all_spectra += ['-'.join(spectrum.split('-')[1:])]
                         names += [spectrum]
                         ranges += [frequency_ranges[spectrum]]
             ranges = np.array(ranges)
@@ -1596,35 +1607,22 @@ if args.combine:
                     i += 1
             for spectra_group in names:
                 if len(spectra_group.split(',')) > 1:
-                    averaged_spectra = spectra_group.split(',')
-                    for i, spectra in enumerate(averaged_spectra):
-                        averaged_spectra[i] = spectra.split('-')
-                    common_els = common_elements(averaged_spectra)
-                    name_common = '-'.join(common_els)
-                    name_diff = []
-                    for i, spectra in enumerate(averaged_spectra):
-                        for element in common_els:
-                            averaged_spectra[i].remove(element)
-                        name_diff += ['-'.join(spectra)]
-                    name_diff = '+'.join(name_diff)
-                    if '+' in name_diff:
-                        name_diff = '({})'.format(name_diff)
-                    file_name = '-'.join([name_common, name_diff])
-                    file_name = '{}-r-c'.format(file_name)
-                    for i, spectra in enumerate(averaged_spectra):
-                        averaged_spectra[i] = '-'.join(spectra)
-                    config_combine['files'][file_name.replace('-r-c','')] = \
-                        averaged_spectra
-                else:
-                    file_name = '{}-r'.format(spectra_group)
-                all_spectra[source] += [file_name]
+                    averaged_spectra += [spectra_group.split(',')]
+                    for (i, spectrum) in enumerate(averaged_spectra[-1]):
+                        averaged_spectra[-1][i] = spectrum.replace(source+'-','')
+            file_name = source + '-' + extra_note + '-all-r' + ext
+            file_name = file_name.replace('--','-')
+            config_merging['input files'][file_name] = {}
+            config_merging['input files'][file_name]['all spectra'] = all_spectra
+            config_merging['input files'][file_name]['overlapping spectra'] = \
+                averaged_spectra
 
-    save_yaml_dict(config_combine, 'config-combine-auto.yaml',
-                   default_flow_style=None)
+    save_yaml_dict(config_merging, 'config-merging-auto.yaml',
+                   default_flow_style=False)
         
     # Running of the script that joints the overlapping spectra.
     os.chdir(original_folder)
-    arguments = ['classcombine.py', config_folder +'/config-combine-auto.yaml']
+    arguments = ['classmerging.py', config_folder +'/config-merging-auto.yaml']
     if local_run:
         arguments[0] = codes_folder + arguments[0]
         arguments = ['python3'] + arguments
@@ -1632,45 +1630,7 @@ if args.combine:
             arguments[0] = 'py'
     subprocess.run(arguments)
 
-#%%# Creation of a final file.
-
-    if combine_all:
-        
-        # Class script.
-        script = []
-        for source in np.unique(sources):
-            for spectrum in all_spectra[source]:
-                if not os.path.isfile(output_folder + spectrum + ext):
-                    name_sep = spectrum.split('-')
-                    telescope = '*{}*'.format(name_sep[-2])
-                    input_file = '-'.join(name_sep[:-2]) + '-r'+ext
-                    script += ['file out ' + output_folder + spectrum + ext
-                             + ' m']
-                    script += ['file in {}{}'.format(output_folder, input_file)]
-                    script += ['set telescope {}'.format(telescope)]
-                    script += ['find /all', 'list', 'get first', 'write']
-            script += ['set telescope *']
-            script += ['file out {}{}-all-r-c{} m /overwrite'
-                     .format(output_folder, source, ext)]
-            for spectrum in all_spectra[source]:
-                script += ['file in ' + output_folder + spectrum + ext]
-                script += ['find /all', 'list', 'get first', 'write']
-        script += ['exit']
-        for i in range(len(script) - 1):
-            script[i] += '\n'
-        with open('grouping.class', 'w') as file:
-            file.writelines(script)
-            
-        # Running of the class script.
-        subprocess.run(['class', '@grouping.class'])
-        
-        print('\nCreated files:\n')
-        for source in np.unique(sources):
-            for spectrum in all_spectra[source]:
-                print('- ' + spectrum + ext)
-        print()
-
-#%% Creation of a table with information about each spectrum.
+#%% Spectra table mode.
 
 if args.spectra_tables:
     
@@ -1722,7 +1682,7 @@ if args.spectra_tables:
         table.to_csv(exporting_folder + file_name, sep=',', index=False)
         print('Saved file {}{}.'.format(exporting_folder, file_name))
     
-        if combine_all:
+        if average_all_input_files:
         
             some_overlap = False
             
@@ -1776,7 +1736,7 @@ if args.spectra_tables:
     
     print()
             
-#%% Checking of the plots of the RMS check mode.
+#%% RMS check mode, plots.
 
 if args.check_rms_plots:
     
@@ -1915,6 +1875,15 @@ if len(backup_files) != 0:
     for file in backup_files:
         os.remove(file)
         
+temp_files = ['selection.class', 'selection-doppler.class', 'selection-grouping.class',
+              'rms_check-info.class', 'rms_check-ind.class', 'rms_check-cum.class',
+              'reduction-grouping-1.class', 'reduction-grouping-2.class',
+              'config-averaging-auto.yaml', 'averaging.class', 'averaging-grouping.class',
+              'config-merging-auto-yaml', 'merging.class']
+for file in temp_files:
+    if os.path.exists(file):
+        os.remove(file)
+        
 time2 = time.time()
 total_time = int(time2 - time1)
 minutes, seconds = total_time//60, total_time%60
@@ -1927,10 +1896,10 @@ if minutes == 0:
 phases = []
 
 for arg, descr in zip([args.selection, args.line_search, args.reduction,
-                       args.average, args.combine, args.spectra_tables,
+                       args.merging, args.averaging, args.spectra_tables,
                        args.rms_check, args.check_rms_plots],
                       ['selection', 'line search', 'reduction',
-                       'average', 'combine', 'spectra table', 'rms check',
+                       'merging', 'averaging', 'spectra table', 'rms check',
                        'checking of rms plots']):
     if arg:
         phases += [descr]

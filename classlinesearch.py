@@ -4,7 +4,7 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Line search mode
-Version 1.2
+Version 1.3
 
 Copyright (C) 2024 - Andrés Megías Toledano
 
@@ -261,20 +261,12 @@ def fit_baseline(x, y, windows, smooth_size):
     cond = regions_args(x, windows)
     x_ = x[cond]
     y_ = y[cond]
-    
-    y_2 = rolling_function(np.median, y_, smooth_size)
-  
-    s = len(x_)*(1.0*np.std(y_2-y_))**2
+    y_s = rolling_function(np.median, y_, smooth_size)
+    s = sum((y_s - y_)**2)
     spl = UnivariateSpline(x_, y_, s=s)
-    y3 = spl(x)
-    
-    y2 = y.copy()
-    y2[~cond] = y3[~cond]
-    
-    y3 = rolling_function(np.median, y2, smooth_size)
-    y3 = rolling_function(np.mean, y3, smooth_size//3)
+    yf = spl(x)
         
-    return y3
+    return yf
 
 def identify_lines(x, y, smooth_size, line_width, sigmas, iters=2,
                    rolling_sigma_clip=False):

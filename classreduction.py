@@ -4,7 +4,7 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Reduction mode
-Version 1.2
+Version 1.3
 
 Copyright (C) 2024 - Andrés Megías Toledano
 
@@ -23,8 +23,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 # Libraries and functions.
 import os
-import gc
-import sys
 import copy
 import time
 import argparse
@@ -107,7 +105,7 @@ def regions_args(x, windows, margin=0):
     """
     cond = np.ones(len(x), dtype=bool)
     dx = np.median(np.diff(x))
-    for x1, x2 in windows:
+    for (x1, x2) in windows:
         cond *= (x <= x1 - dx*margin) + (x >= x2 + dx*margin)
     return cond
 
@@ -153,27 +151,19 @@ def fit_baseline(x, y, windows, smooth_size):
 
     Returns
     -------
-    y3 : array
+    yf : array
         Baseline of the curve.
     """
     
     cond = regions_args(x, windows)
     x_ = x[cond]
     y_ = y[cond]
-    
-    y_2 = rolling_function(np.median, y_, smooth_size)
-  
-    s = len(x_)*(1.0*np.std(y_2-y_))**2
+    y_s = rolling_function(np.median, y_, smooth_size)
+    s = sum((y_s - y_)**2)
     spl = UnivariateSpline(x_, y_, s=s)
-    y3 = spl(x)
-    
-    y2 = y.copy()
-    y2[~cond] = y3[~cond]
-    
-    y3 = rolling_function(np.median, y2, smooth_size)
-    y3 = rolling_function(np.mean, y3, smooth_size//3)
+    yf = spl(x)
         
-    return y3
+    return yf
 
 def load_spectrum(file, load_fits=False):
     """
@@ -388,19 +378,6 @@ def invert_windows(windows, x):
     windows = get_windows(~mask, x)
     return windows
 
-def calculate_ylims(spectrum, x_lims=None, perc1=0., perc2=100.,
-                    rel_margin_y=0.04):
-    """Calculate vertical limits for the given spectrum."""
-    frequency = spectrum['frequency']
-    intensity = spectrum['intensity']
-    mask = (frequency >= x_lims[0]) & (frequency <= x_lims[1])
-    intensity = intensity[mask]
-    y1 = np.nanpercentile(intensity, perc1)
-    y2 = np.nanpercentile(intensity, perc2)
-    margin = rel_margin_y * (y2 - y1)
-    y_lims = [y1 - margin, y2 + margin]
-    return y_lims 
-
 def plot_windows(selected_points):
     """Plot the current selected windows."""
     for x in selected_points:
@@ -447,14 +424,11 @@ def plot_data(spectrum):
     plt.plot(frequency, intensity_cont, 'tab:green', label='fitted baseline')
     if not args.rms_check:
         plot_windows(selected_points)
-    plt.axvspan(None, None, facecolor='lightgray', edgecolor='darkgray',
+    plt.axvspan(0, 0, facecolor='lightgray', edgecolor='darkgray',
                 label='masked windows')
     plt.ticklabel_format(style='sci', useOffset=False)
     plt.xlim(x_lims)
-    try:
-        plt.ylim(y_lims)
-    except:
-        pass
+    plt.ylim(y_lims)
     plt.xlabel('frequency (MHz)')
     plt.ylabel('intensity (K)')
     plt.legend(loc='upper right')
@@ -466,6 +440,7 @@ def plot_data(spectrum):
         plot_windows(selected_points)
     plt.ticklabel_format(style='sci', useOffset=False)
     plt.xlim(x_lims)
+    plt.ylim(yr_lims)
     plt.xlabel('frequency (MHz)')
     plt.ylabel('reduced intensity (K)')
     plt.tight_layout()
@@ -541,7 +516,7 @@ def press_key(event):
     """Interact with the plot when pressing a key."""
     if type(event) is not KeyEvent:
         pass
-    global spectrum, selected_points, data_log, ilog, x_lims, y_lims
+    global spectrum, selected_points, data_log, ilog, x_lims, y_lims, yr_lims
     if event.key == 'enter':
         data_log = data_log[:ilog+1]
         plt.close('all')
@@ -550,6 +525,8 @@ def press_key(event):
     plt.subplot(2,1,1)
     x_lims = plt.xlim()
     y_lims = plt.ylim()
+    plt.subplot(2,1,2)
+    yr_lims = plt.ylim()
     if event.key in ('z', 'Z', '<', 'left', 'right'):
         x_range = x_lims[1] - x_lims[0]
         if event.key in ('z', 'Z', '<'):
@@ -564,7 +541,6 @@ def press_key(event):
                 x_lims = [x_lims[0] - x_range/4, x_lims[1] - x_range/4]
             elif event.key == 'right':
                 x_lims = [x_lims[0] + x_range/2, x_lims[1] + x_range/2]
-        y_lims = calculate_ylims(spectrum, x_lims, perc1=0, perc2=100)
     elif event.key in ('r', 'R'):
         factor = copy.copy(args.smooth)
         if 'R' in event.key:
@@ -651,11 +627,13 @@ for file in args.file.split(','):
     # Interactive check of windows.
     selected_points = list(np.array(windows).flatten())
     x_lims = [frequency.min(), frequency.max()]
-    y_lims = [intensity.min(), intensity.max()]
+    y_lims = [None, None]
+    yr_lims = [None, None]
     if args.check_windows:
         plt.close('all')
         print('Using manual check of windows.\n'
-              ' - Use Z/< and Left/Right to explore the spectrum region.\n'
+              ' - Use Z/<, Left/Right or the plot buttons to explore the'
+               ' spectrum region.\n'
               ' - Left/Right click to add/remove a window edge.\n'
               ' - Press Tab to remove all the windows.\n'
               ' - Press Ctrl+Z / Ctrl+Shift+Z to undo/redo.\n'
@@ -672,11 +650,11 @@ for file in args.file.split(','):
         plt.show()  # interactive mode
         intensity = spectrum['intensity']
         windows = format_windows(selected_points)
-        were_windows_updated = True
         if not np.array_equal(windows, windows_copy):
-            print('Updated windows for file {}.'.format(file))
             windows = [[float(x1),float(x2)] for (x1,x2) in windows]
             windows_dict[file] = windows
+            were_windows_updated = True
+            print('Updated windows for file {}.'.format(file))
     
     # Noise.
     rms_noise = get_rms_noise(frequency, intensity_red, windows,
@@ -707,8 +685,6 @@ for file in args.file.split(','):
     print('Saved reduced spectrum in {}{}.fits.'.format(args.folder, output_file))
     print('Saved reduced spectrum in {}{}.dat.'.format(args.folder, output_file))
     
-    gc.collect()
-    
     if not args.check_windows or args.save_plots:   
         
         plot_data(spectrum)
@@ -726,8 +702,6 @@ for file in args.file.split(','):
             print("    Saved plot in {}{}.".format(args.plots_folder, file_name))
             
     print()
-    gc.collect()
-            
         
 # Export of the rms noise of each spectrum.
 save_yaml_dict(rms_noises, 'rms_noises.yaml', default_flow_style=False)
