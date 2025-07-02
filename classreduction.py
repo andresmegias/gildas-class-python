@@ -6,7 +6,7 @@ Automated GILDAS-CLASS Pipeline
 Reduction mode
 Version 1.3
 
-Copyright (C) 2024 - Andrés Megías Toledano
+Copyright (C) 2025 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -415,24 +415,22 @@ def plot_data(spectrum):
     intensity_cont = spectrum['baseline']
     intensity_red = intensity - intensity_cont
 
-    fig = plt.figure(1, figsize=(10,7))
+    fig = plt.figure(1)
     plt.clf()
-    plt.subplots_adjust(hspace=0, wspace=0)
     
     sp1 = plt.subplot(2,1,1)
     plt.step(frequency, intensity, where='mid', color='black', ms=6)
     plt.plot(frequency, intensity_cont, 'tab:green', label='fitted baseline')
     if not args.rms_check:
         plot_windows(selected_points)
-    plt.axvspan(0, 0, facecolor='lightgray', edgecolor='darkgray',
+    plt.axvspan(0., 0., 0., 0., facecolor='lightgray', edgecolor='darkgray',
                 label='masked windows')
     plt.ticklabel_format(style='sci', useOffset=False)
     plt.xlim(x_lims)
     plt.ylim(y_lims)
     plt.xlabel('frequency (MHz)')
-    plt.ylabel('intensity (K)')
+    plt.ylabel('original intensity (K)')
     plt.legend(loc='upper right')
-    plt.tight_layout()
 
     plt.subplot(2,1,2, sharex=sp1)
     plt.step(frequency, intensity_red, where='mid', color='black')
@@ -443,12 +441,11 @@ def plot_data(spectrum):
     plt.ylim(yr_lims)
     plt.xlabel('frequency (MHz)')
     plt.ylabel('reduced intensity (K)')
-    plt.tight_layout()
 
     title = 'Full spectrum - {}\n'.format(file)
-    fontsize = max(7, 12 - 0.1*max(0, len(title) - 85))
+    fontsize = max(7., 12. - 0.1*max(0, len(title) - 85.))
     plt.suptitle(title, fontsize=fontsize, fontweight='semibold')
-    plt.tight_layout(pad=0.7, h_pad=0.6, w_pad=0.1)
+    plt.tight_layout(pad=0.7, h_pad=1.0)
     plt.text(0.98, 0.96, 'check terminal\nfor instructions',
              ha='right', va='top', transform=plt.gca().transAxes,
              bbox=dict(edgecolor=[0.8]*3, facecolor='white'))
@@ -631,6 +628,7 @@ for file in args.file.split(','):
     yr_lims = [None, None]
     if args.check_windows:
         plt.close('all')
+        plt.figure(1, figsize=(9,7))
         print('Using manual check of windows.\n'
               ' - Use Z/<, Left/Right or the plot buttons to explore the'
                ' spectrum region.\n'

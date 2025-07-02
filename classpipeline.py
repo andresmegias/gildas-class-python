@@ -6,7 +6,7 @@ Automated GILDAS-CLASS Pipeline
 Main script
 Version 1.3
 
-Copyright (C) 2022 - Andrés Megías Toledano
+Copyright (C) 2025 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -195,11 +195,11 @@ def default_elements(lists):
 
 #%%
 
-# Folder separator.
-separator = '/'
+# Folder sep.
+sep = '/'
 operating_system = platform.system()
 if operating_system == 'Windows':
-    separator = '\\'
+    sep = '\\'
 
 # Arguments.
 parser = argparse.ArgumentParser()
@@ -233,7 +233,8 @@ default_options = {
     'bad scans': [],
     'default telescopes': ['*'],
     'observatory': '',
-    'telescope efficiencies': {},
+    'scale to main beam': False,
+    'telescope main beam efficiencies': {},
     'frequency units': 'MHz',
     'weighting mode': 'time',
     'line frequencies (MHz)': {},
@@ -246,17 +247,17 @@ default_options = {
     'only rms noise plots': False,
     'extra note': '',
     'reduction': {
-        'check windows': False,
+        'check windows': True,
         'save plots': False,
         'rolling sigma clip': False,
         'reference width': 14,
         'smoothing factor': 20,
-        'intensity threshold (rms)': 8,
+        'intensity threshold (rms)': 8.,
         'relative frequency margin for rms noise': 0.1
         },
     'ghost lines' : {
         'clean lines': False,
-        'absolute intensity threshold (rms)': 10,
+        'absolute intensity threshold (rms)': 10.,
         'relative intensity threshold': 0.3,
         'smoothing factor': 40
         },
@@ -286,9 +287,9 @@ print('\nStarting the processing of the data.')
 # Folders.
 original_folder = os.getcwd()
 if local_run:
-    codes_folder = separator.join([original_folder]
-                                  + sys.argv[0].split(separator)[:-1])
-    codes_folder += separator
+    codes_folder = sep.join([original_folder]
+                                  + sys.argv[0].split(sep)[:-1])
+    codes_folder += sep
 
 # Reading of the configuration file.
 config_path = full_path(args.config)
@@ -298,7 +299,7 @@ if os.path.isfile(config_path):
 else:
     raise FileNotFoundError('Configuration file not found.')
 options = {**default_options, **config}
-config_folder = separator.join(args.config.split(separator)[:-1])
+config_folder = full_path(sep.join(args.config.split(sep)[:-1]))
 if config_folder == '':
     config_folder = '.'
 os.chdir(config_folder)
@@ -312,8 +313,8 @@ plots_folder = options['plots folder']
 default_telescopes = options['default telescopes']
 observatory = options['observatory']
 bad_scans = options['bad scans']
-telescope_effs = options['telescope efficiencies']
-modify_beam_eff = len(telescope_effs) != 0
+telescope_effs = options['telescope main beam efficiencies']
+modify_beam_eff = options['scale to main beam']
 if modify_beam_eff and 'beam efficiency' in telescope_effs:
     telescope_effs = {'default': telescope_effs}
 frequency_units = options['frequency units']
@@ -356,18 +357,14 @@ elif frequency_units == 'GHz':
       to_GHz = 1.0
 
 # Checks and setting of the common options.
-data_folder = data_folder.replace('./', '')
-exporting_folder = exporting_folder.replace('./', '')
-output_folder = output_folder.replace('./', '')
-plots_folder = plots_folder.replace('./', '')
-if not data_folder.endswith(separator):
-    data_folder += separator
-if not exporting_folder.endswith(separator):
-    exporting_folder += separator
-if not output_folder.endswith(separator):
-    output_folder += separator
-if not plots_folder.endswith(separator):
-    plots_folder += separator
+if not data_folder.endswith(sep):
+    data_folder += sep
+if not exporting_folder.endswith(sep):
+    exporting_folder += sep
+if not output_folder.endswith(sep):
+    output_folder += sep
+if not plots_folder.endswith(sep):
+    plots_folder += sep
 if len(input_files) == 0:
     raise Exception('There are no input files specified.')
 if not os.path.isdir(full_path(data_folder)):
@@ -404,8 +401,8 @@ if not os.path.isdir(full_path(exporting_folder)):
     os.makedirs(full_path(exporting_folder))
 if not os.path.isdir(full_path(output_folder)):
     os.makedirs(full_path(output_folder))
-if not os.path.isdir(full_path(output_folder + 'all/')):
-    os.makedirs(full_path(output_folder + 'all/'))
+if not os.path.isdir(full_path(output_folder + 'all') + sep):
+    os.makedirs(full_path(output_folder + 'all') + sep)
 if not os.path.isdir(full_path(plots_folder)):
     os.makedirs(full_path(plots_folder))
 
@@ -532,7 +529,7 @@ if args.selection:
                 
     # Creating CLASS files for each spectrum.
     script += ['set source *', 'set line *', 'set telescope *']
-    all_subfolder = 'all' + separator
+    all_subfolder = 'all' + sep
     for file in output_files:
         script += ['file in {}/{}'.format(output_folder, file)]
         script += ['find /all']
@@ -544,15 +541,11 @@ if args.selection:
             script += ['find /all', 'get first']
             script += ['write']
             if not average_all_input_files:
-                # print(spectrum)
-                # input()
                 i = 3 if spectrum.split('-')[1][0].isdigit() else 2
                 note = '-'.join(spectrum.split('-')[i:-1])
                 spectrum = spectrum.replace('-'+note+'-','-') + '-'+note
                 script += ['file out {}{}{} m /overwrite'
                            .format(output_folder, all_subfolder, spectrum + ext)]
-                # print(script[-1])
-                # input()
                 script += ['write']
     
     # End of the script.
@@ -833,8 +826,7 @@ if args.rms_check:
                         if 'N;V' in text_line and 'Source' in text_line:
                             list_zone = True
                 
-                    rms_filenames = \
-                        pd.DataFrame.from_dict(rms_id, orient='index',
+                    rms_filenames = pd.DataFrame.from_dict(rms_id, orient='index',
                                                columns=['file', 'obs', 'scan'])   
         
                     file_path = os.path.realpath(exporting_folder + file_name)
@@ -853,11 +845,10 @@ if args.rms_check:
                     script += ['set weight ' + weight_mode]
                     for i in range(0, num_obs, group_size):
                         script += ['set mode x {} {}'.format(*rms_freq_range)]
-                        group_scans, group_obs, group_indices = [], [], []
+                        group_obs, group_indices = [], []
                         first = True
                         i_max = min(i + group_size, num_obs)
                         for j in range(i, i_max):
-                            # script += ['set scan {} {}'.format(*[scan_nums[j]]*2)]
                             script += ['set source --{}--*'.format(file_nums[j])]
                             script += ['set number {} {}'.format(*[obs_nums[j]]*2)]
                             if first:
@@ -865,10 +856,8 @@ if args.rms_check:
                                 script += ['find /all']
                             else:
                                 script += ['find append /all']
-                            # group_scans += [scan_nums[j]]
                             group_obs += [obs_nums[j]]
                             group_indices += [str(j+1)]
-                        # group_scans = group_scans[0] + 'to' + group_scans[-1]
                         group_obs = group_obs[0] + 'to' + group_obs[-1]
                         group_indices = '+'.join(group_indices)
                         script += ['list', 'average /nocheck']
@@ -922,11 +911,10 @@ if args.rms_check:
                              + ' m /overwrite']
                     script += ['set weight ' + weight_mode]
                     for i in range(0, num_obs, group_size):
-                        group_scans, group_obs, group_indices = [], [], []
+                        group_obs, group_indices = [], []
                         first = True
                         i_max = min(i + group_size, num_obs)
                         for j in range(0, i_max):
-                            # script += ['set scan {} {}'.format(*[scan_nums[j]]*2)]
                             script += ['set source --{}--*'.format(file_nums[j])]
                             script += ['set number {} {}'.format(*[obs_nums[j]]*2)]
                             if first:
@@ -934,10 +922,8 @@ if args.rms_check:
                                 script += ['find /all']
                             else:
                                 script += ['find append /all']
-                            # group_scans += [scan_nums[j]]
                             group_obs += [obs_nums[j]]
                             group_indices += [str(j+1)]
-                        # group_scans = 'to{}'.format(group_scans[-1])
                         group_obs = 'to' + group_obs[-1]
                         group_indices = 'to{}'.format(group_indices[-1])
                         script += ['list', 'average /nocheck']
@@ -990,9 +976,6 @@ if args.rms_check:
                                 spectrum = str(all_rms_spectra[i])
                                 doppler_corr[spectrum] = doppler_text[i]
                         else:
-                            # print(len(doppler_text))
-                            # print(len(all_rms_spectra))
-                            # print(num_obs)
                             message = 'Error reading Doppler corrections'
                             raise Exception(message)
                     else:
@@ -1370,8 +1353,6 @@ if args.reduction:
     
     with open(exporting_folder + 'doppler_corrections.yaml') as file:
         doppler_corr = yaml.safe_load(file)
-    # with open(exporting_folder + 'frequency_windows.yaml') as file:
-    #     frequency_windows = yaml.safe_load(file)
     
     if modify_beam_eff:
         with open(exporting_folder + 'frequency_ranges.yaml') as file:
@@ -1385,14 +1366,11 @@ if args.reduction:
         final_files += [red_file.replace(ext, '-r' + ext)]
     for (file, red_file) in zip(output_files, final_files):
         script += ['file out ' + output_folder + red_file + ' m /overwrite']
-        # mean_freqs, noises, windows = [], [], []
         for spectrum in output_spectra[file]:
             script += ['fits read ' + exporting_folder + spectrum + '-r.fits']
             if modify_beam_eff:
                 mean_freq = np.mean(frequency_ranges[spectrum]) * to_GHz
                 noise = rms_noises[spectrum]
-                # windows += [frequency_windows[spectrum]]
-                # mean_freqs += [mean_freq]
                 keys = list(telescope_effs.keys())
                 if keys == ['default']:
                     key = keys[0]
@@ -1417,44 +1395,6 @@ if args.reduction:
                 beam_effs[str(spectrum)] = float(beam_eff)
             script += ['modify doppler ' + doppler_corr[spectrum]]
             script += ['write']
-            # noises += [noise]
-        # script += ['file in ' + output_folder + red_file]
-        # script += ['find /all']
-        # if modify_beam_eff:
-        #     script += ['file out ' + output_folder
-        #                + red_file.replace(ext, '-temp'+ext) + ' m /overwrite']
-        #     beam_eff = np.interp(np.mean(mean_freqs),
-        #                          telescope_effs[key]['frequency (GHz)'],
-        #                          telescope_effs[key]['beam efficiency'])
-        #     script += ['get first']
-        #     script += ['modify beam_eff {}'.format(round(beam_eff,2))]
-        #     script += ['write']
-        #     for i in range(len(output_spectra[file])-1):
-        #         script += ['get next']
-        #         script += ['modify beam_eff {}'.format(round(beam_eff,2))]
-        #         script += ['write']
-        #     script += ['file in ' + output_folder
-        #                + red_file.replace(ext, '-temp'+ext)]
-        #     script += ['find /all']
-        # script += ['stitch']
-        # file_name = red_file.replace(ext, '.dat')
-        # script += ['greg ' + exporting_folder + file_name + ' /formatted']
-        # file_name = file_name.replace('.dat', '.fits')
-        # if os.path.isfile(exporting_folder + file_name):
-        #     os.remove(exporting_folder + file_name)
-        # script += ['fits write {} /mode spectrum'
-        #           .format(exporting_folder + file_name)]
-        # spectrum = red_file.replace('-r'+ext, '')
-        # windows = np.concatenate(tuple(windows), axis=0)
-        # windows = [[float(x1),float(x2)] for (x1,x2) in windows]
-        # frequency_windows[spectrum] = list(windows)
-        # beam_effs[str(spectrum)] = float(beam_eff)
-        # rms_noises[spectrum] = float(np.mean(noises))
-        
-    # save_yaml_dict(frequency_windows, exporting_folder + 'frequency_windows.yaml',
-    #                default_flow_style=False)
-    # print('Saved updated frequency windows in {}frequency_windows.yaml.'
-    #       .format(exporting_folder))
             
     if modify_beam_eff:
         
@@ -1470,7 +1410,8 @@ if args.reduction:
     
     # End of the script.
     script += ['exit']
-    script += [line + '\n' for line in script]
+    print(script)
+    script = [line + '\n' for line in script]
     # Writing of the class file.
     with open('reduction-grouping-1.class', 'w') as file:
         file.writelines(script)
@@ -1546,7 +1487,8 @@ if args.averaging:
         
     # Running of the script that joints the overlapping spectra.
     os.chdir(original_folder)
-    arguments = ['classaveraging.py', config_folder +'/config-averaging-auto.yaml']
+    arguments = ['classaveraging.py', config_folder + sep
+                 + 'config-averaging-auto.yaml']
     if local_run:
         arguments[0] = codes_folder + arguments[0]
         arguments = ['python3'] + arguments
@@ -1869,8 +1811,8 @@ if args.check_rms_plots:
        
 #%% Ending.
 
-backup_files = glob.glob(exporting_folder + '/*.dat~')
-# backup_files = glob.glob(exporting_folder + '/*.fits~')
+backup_files = glob.glob(exporting_folder + sep + '*.dat~')
+# backup_files = glob.glob(exporting_folder + sep + '*.fits~')
 if len(backup_files) != 0:
     for file in backup_files:
         os.remove(file)
