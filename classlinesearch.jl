@@ -3,7 +3,7 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Line search mode
-Version 1.2
+Version 1.3
 
 Copyright (C) 2024 - Andrés Megías Toledano
 
@@ -283,26 +283,17 @@ function fit_baseline(x::Vector{Float64}, y::Vector{Float64};
 
     Returns
     -------
-    y3 : Vector
+    yf : Vector
         Baseline of the curve.
     """
     cond = regions_args(x, windows)
     x_ = x[cond]
     y_ = y[cond]
-
-    y_2 = rolling_function(stats.median, y_, smooth_size)
-
-    s = length(x_) * (1.0*stats.std(y_2-y_))^2
+    y_s = rolling_function(stats.median, y_, smooth_size)
+    s = sum((y_s - y_).^2)
     spl = scipy_interpolate.UnivariateSpline(x_, y_, s=s)
-    y3 = spl(x)
-
-    y2 = copy(y)
-    y2[.!cond] = y3[.!cond]
-
-    y3 = rolling_function(stats.median, y2, smooth_size)
-    y3 = rolling_function(stats.mean, y3, smooth_size÷3)
-
-    return y3
+    yf = spl(x)
+    return yf
 end
 
 function identify_lines(x::Vector{Float64}, y::Vector{Float64}; smooth_size::Int,
@@ -512,9 +503,8 @@ for file in split(args["file"], ",")
         plt.ticklabel_format(style="sci", useOffset=false)
         plt.margins(x=0)
         plt.xlabel("frequency (MHz)")
-        plt.ylabel("intensity (K)")
+        plt.ylabel("original intensity (K)")
         plt.legend(loc="upper right")
-        plt.tight_layout()
 
         plt.subplot(2,1,2, sharex=sp1)
         for i in 1:num_windows
@@ -526,10 +516,9 @@ for file in split(args["file"], ",")
         plt.margins(x=0)
         plt.xlabel("frequency (MHz)")
         plt.ylabel("reduced intensity (K)")
-        plt.tight_layout()
 
         plt.suptitle("Full spectrum - $file", fontweight="semibold")
-        plt.tight_layout(pad=0.7, h_pad=0.6, w_pad=0.1)
+        plt.tight_layout(pad=0.7, h_pad=1.0)
 
         dx = stats.median(diff(frequency))
         plt.matplotlib.rc("font", size=8)

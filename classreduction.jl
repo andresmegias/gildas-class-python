@@ -3,9 +3,9 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Reduction mode
-Version 1.2
+Version 1.3
 
-Copyright (C) 2022 - Andrés Megías Toledano
+Copyright (C) 2024 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -284,26 +284,17 @@ function fit_baseline(x::Vector{Float64}, y::Vector{Float64};
 
     Returns
     -------
-    y3 : Array
+    yf : Array
         Baseline of the curve.
     """
     cond = regions_args(x, windows)
     x_ = x[cond]
     y_ = y[cond]
-
-    y_2 = rolling_function(stats.median, y_, smooth_size)
-
-    s = length(x_) * (1.0*stats.std(y_2-y_))^2
+    y_s = rolling_function(stats.median, y_, smooth_size)
+    s = sum((y_s - y_).^2)
     spl = scipy_interpolate.UnivariateSpline(x_, y_, s=s)
-    y3 = spl(x)
-
-    y2 = copy(y)
-    y2[.!cond] = y3[.!cond]
-
-    y3 = rolling_function(stats.median, y2, smooth_size)
-    y3 = rolling_function(stats.mean, y3, smooth_size÷3)
-
-    return y3
+    yf = spl(x)
+    return yf
 end
 
 function identify_lines(x::Vector{Float64}, y::Vector{Float64}; smooth_size::Int,
@@ -592,8 +583,6 @@ argparse.@add_arg_table! aps begin
     "--plots_folder"
     arg_type = String
     default = "plots"
-    "--no_plots"
-    action = :store_true
     "--save_plots"
     action = :store_true
 end
@@ -654,7 +643,7 @@ for file in split(args["file"], ",")
     println("Saved reduced spectrum in $(args["folder"])$file.fits.")
     println("Saved reduced spectrum in $(args["folder"])$file.dat.")
 
-    if ! args["no_plots"] | args["save_plots"]
+    if args["save_plots"]
 
         plt.figure(1, figsize=(10,7))
         plt.clf()
@@ -670,9 +659,8 @@ for file in split(args["file"], ",")
         plt.ticklabel_format(style="sci", useOffset=false)
         plt.margins(x=0)
         plt.xlabel("frequency (MHz)")
-        plt.ylabel("intensity (K)")
+        plt.ylabel("original intensity (K)")
         plt.legend(loc="upper right")
-        plt.tight_layout()
 
         plt.subplot(2,1,2, sharex=sp1)
         plt.step(frequency, intensity_red, where="mid", color="black")
@@ -684,12 +672,11 @@ for file in split(args["file"], ",")
         plt.margins(x=0)
         plt.xlabel("frequency (MHz)")
         plt.ylabel("reduced intensity (K)")
-        plt.tight_layout()
 
         title = "Full spectrum - $file"
         fontsize = max(7, 12 - 0.1*max(0, length(title) - 85))
         plt.suptitle(title, fontsize=fontsize, fontweight="semibold")
-        plt.tight_layout(pad=0.7, h_pad=0.6, w_pad=0.1)
+        plt.tight_layout(pad=0.7, h_pad=1.0)
 
         if args["save_plots"]
             cd(original_folder)
@@ -699,12 +686,6 @@ for file in split(args["file"], ",")
             cd(safe_realpath(args["folder"]))
             print("    ")
             println("Saved plot in $(args["plots_folder"])spectrum-$file.png.")
-        end
-
-        if ! args["no_plots"]
-            plt.show()
-        else
-            plt.close("all")
         end
 
     end

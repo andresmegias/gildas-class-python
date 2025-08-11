@@ -303,8 +303,7 @@ def identify_lines(x, y, smooth_size, line_width, sigmas, iters=2,
     for i in range(iters):
  
         if rolling_sigma_clip:
-            cond = rolling_sigma_clip_args(x, y-y2, 2*smooth_size, sigmas,
-                                           iters=2)
+            cond = rolling_sigma_clip_args(x, y-y2, 2*smooth_size, sigmas, iters=2)
         else:
             cond = sigma_clip_args(y-y2, sigmas=sigmas, iters=2)
         windows = get_windows(x, ~cond, margin=1.5, width=line_width)
@@ -438,9 +437,8 @@ for file in args.file.split(','):
         plt.ticklabel_format(style='sci', useOffset=False)
         plt.margins(x=0)
         plt.xlabel('frequency (MHz)')
-        plt.ylabel('intensity (K)')
+        plt.ylabel('original intensity (K)')
         plt.legend(loc='upper right')
-        plt.tight_layout()
     
         plt.subplot(2,1,2, sharex=sp1)
         for x1, x2 in windows:
@@ -450,12 +448,11 @@ for file in args.file.split(','):
         plt.margins(x=0)
         plt.xlabel('frequency (MHz)')
         plt.ylabel('reduced intensity (K)')
-        plt.tight_layout()
 
         plt.suptitle('Full spectrum - {}'.format(file),
                      fontweight='semibold')
         fig.align_ylabels()
-        plt.tight_layout(pad=0.7, h_pad=0.6, w_pad=0.1)
+        plt.tight_layout(pad=0.7, h_pad=1.0)
 
         dx = np.median(np.diff(frequency)) 
         plt.rcParams['font.size'] = 8

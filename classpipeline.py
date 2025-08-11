@@ -35,7 +35,6 @@ import yaml
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
 from matplotlib.ticker import FuncFormatter
 
 # Functions.
@@ -299,7 +298,7 @@ if os.path.isfile(config_path):
 else:
     raise FileNotFoundError('Configuration file not found.')
 options = {**default_options, **config}
-config_folder = full_path(sep.join(args.config.split(sep)[:-1]))
+config_folder = full_path(sep.join(args.config.split(sep)[:-1])) + sep
 if config_folder == '':
     config_folder = '.'
 os.chdir(config_folder)
@@ -1280,8 +1279,7 @@ if args.rms_check:
 
 if args.line_search:
     print('\nStarting line search.\n')
-    os.chdir(config_folder)
-    files_folder = exporting_folder
+    files_folder = config_folder + exporting_folder
     if args.use_julia:
         arguments = ['classlinesearch.jl', files_folder, ','.join(all_spectra),
                      '--plots_folder', plots_folder,
@@ -1314,8 +1312,7 @@ if args.line_search:
 if args.reduction:
     
     print('\nStarting reduction.\n')
-    os.chdir(config_folder)
-    files_folder = exporting_folder
+    files_folder = config_folder + exporting_folder
     if check_windows:
         args.use_julia = False
     if args.use_julia:
@@ -1564,7 +1561,7 @@ if args.merging:
         
     # Running of the script that joints the overlapping spectra.
     os.chdir(original_folder)
-    arguments = ['classmerging.py', config_folder +'/config-merging-auto.yaml']
+    arguments = ['classmerging.py', config_folder +sep+'config-merging-auto.yaml']
     if local_run:
         arguments[0] = codes_folder + arguments[0]
         arguments = ['python3'] + arguments
@@ -1750,7 +1747,7 @@ if args.check_rms_plots:
         
                     image = plot_images[i]
                     plt.clf()
-                    plt.imshow(mpimg.imread(image))
+                    plt.imshow(plt.imread(image))
                     plt.axis('off')
                     plt.tight_layout()
                     plt.pause(0.1)
