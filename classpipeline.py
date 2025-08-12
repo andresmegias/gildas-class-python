@@ -1067,7 +1067,7 @@ if args.rms_check:
                     
                     locs = np.arange(len(rms_ind))
                     labels = output_spectra_rms['rms_check-ind' + ext]
-                    for i, label in enumerate(labels):
+                    for (i, label) in enumerate(labels):
                         labels[i] = label.split('-')[-1]
                         labels_i = labels[i].split('+')
                         labels[i] = '-'.join([labels_i[0], labels_i[-1]])
@@ -1135,7 +1135,7 @@ if args.rms_check:
                 plt.plot(locs, rms_cum, '.', color=color, label=label_cum)
                 plt.plot([], [], '.', alpha=0, label=label_rms)
                 
-                for i, metric_i in enumerate(metric):
+                for (i, metric_i) in enumerate(metric):
                     if metric_i > 0:
                         plt.axvline(locs[i], linewidth=1, linestyle='--',
                                     color=color, alpha=0.6)
@@ -1171,7 +1171,7 @@ if args.rms_check:
                          label='{} MHz, weighted RMS variation'
                          .format(range_text[1:-1]))
                 plt.axhline(y=0, linestyle='--', linewidth=0.7, color='black')
-                for i, metric_i in enumerate(metric):
+                for (i, metric_i) in enumerate(metric):
                     if metric_i > 0:
                         plt.axvline(locs[i], linewidth=1, linestyle='--',
                                     color=color, alpha=0.6)
@@ -1215,7 +1215,7 @@ if args.rms_check:
                                  label=label_cum)
                         plt.plot([], [], '.', alpha=0, label=label_rms)
                         diff_rms_cum = np.diff(rms_cum[i1:i2])
-                        for i, metric_i in enumerate(diff_rms_cum ):
+                        for (i, metric_i) in enumerate(diff_rms_cum ):
                             if metric_i > 0:
                                 plt.axvline(locs[i1+i+1], linewidth=1,
                                             linestyle='--', color=color,
