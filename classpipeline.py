@@ -461,7 +461,7 @@ for file in input_files:
                 for scan in set(bad_scans_i):
                     script += ['ignore /scan {}'.format(scan)]
                 # Average.
-                script += ['find /all', 'list', 'stitch']
+                script += ['find /all', 'list', 'average /nocheck']
                 if fold_spectra:
                     script += ['fold']
                 if line in line_frequencies and telescope in line_frequencies[line]:
@@ -584,7 +584,7 @@ if args.selection:
 
     # End of the script.
     script += ['exit']
-    sript = [line + '\n' for line in script]
+    script = [line + '\n' for line in script]
  
     # Writing of the first class file.
     with open('selection-doppler.class', 'w') as file:
@@ -721,7 +721,7 @@ if args.rms_check:
                     # Class file for selecting desired observations.
                     script = []
                     
-                    for i, file in enumerate(input_files):
+                    for (i, file) in enumerate(input_files):
                         
                         script += ['file in ' + data_folder + file]
                         ext = '.' + file.split('.')[-1]
