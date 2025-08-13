@@ -25,6 +25,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import os
 import copy
 import time
+import platform
 import argparse
 import yaml
 import numpy as np
@@ -575,8 +576,10 @@ args = parser.parse_args()
 original_folder = os.path.realpath(os.getcwd())
 os.chdir(args.folder)
 
-# Remove keymaps for interactive mode.
+# Change backend and remove keymaps for interactive mode.
 if args.check_windows:
+    if not platform.platform.startswith('macOS'):
+        plt.matplotlib.use('qtagg')
     keymaps = ('back', 'copy', 'forward', 'fullscreen', 'grid', 'grid_minor',
                'help', 'home', 'pan', 'quit', 'quit_all', 'save', 'xscale',
                'yscale', 'zoom')
