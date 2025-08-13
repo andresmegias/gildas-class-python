@@ -286,9 +286,10 @@ print('\nStarting the processing of the data.')
 # Folders.
 original_folder = os.getcwd()
 if local_run:
-    codes_folder = sep.join([original_folder]
-                                  + sys.argv[0].split(sep)[:-1])
+    codes_folder = sep.join([original_folder] + sys.argv[0].split(sep)[:-1])
     codes_folder += sep
+if not original_folder.endswith(sep):
+    original_folder += sep
 
 # Reading of the configuration file.
 config_path = full_path(args.config)
@@ -299,8 +300,8 @@ else:
     raise FileNotFoundError('Configuration file not found.')
 options = {**default_options, **config}
 config_folder = full_path(sep.join(args.config.split(sep)[:-1])) + sep
-if config_folder == '':
-    config_folder = '.'
+if not config_folder.endswith(sep):
+    config_folder += sep
 os.chdir(config_folder)
 
 # Reading of the variables.
@@ -367,7 +368,7 @@ if not plots_folder.endswith(sep):
 if len(input_files) == 0:
     raise Exception('There are no input files specified.')
 if not os.path.isdir(full_path(data_folder)):
-    raise Exception('Folder {} does not exist.'.format(data_folder))
+    raise Exception(f'Folder {data_folder} does not exist.')
 if not only_daily_bad_scans:
     bad_files = []
     for file in input_files:
@@ -378,10 +379,9 @@ if not only_daily_bad_scans:
 input_files = {file.replace('--',''): input_files[file] for file in input_files}
 for file in input_files:
     if not os.path.isfile(full_path(data_folder + file)):
-        raise Exception('The file {} is missing.'.format(file))
+        raise Exception(f'The file {file} is missing.')
     if not 'sources-lines-telescopes' in input_files[file]:
-        raise Exception('There are no sources specified in file {}.'
-                        .format(file))
+        raise Exception(f'There are no sources specified in file {file}.')
     else:
         sources = input_files[file]['sources-lines-telescopes']
         for (source, lines) in zip(sources, sources.values()):
@@ -391,9 +391,9 @@ for file in input_files:
                      [line]) = default_telescopes
     if not average_all_input_files:
         if not 'note' in input_files[file]:
-            raise Exception('There is no note for file {}.'.format(file))
+            raise Exception(f'There is no note for file {file}.')
         elif len(input_files[file]['note']) == 0:
-            raise Exception('The note of the file {} is empty.'.format(file))
+            raise Exception(f'The note of the file {file} is empty.')
 if options['frequency units'] not in ['MHz', 'GHz']:
     raise Exception('Wrong units for frequency, should be MHz or GHz.')
 if not os.path.isdir(full_path(exporting_folder)):
@@ -626,8 +626,8 @@ if args.selection:
     # Export of the Doppler corrections of each spectrum.
     save_yaml_dict(doppler_corr, './' + exporting_folder
                    + 'doppler_corrections.yaml', default_flow_style=False)
-    print('\nSaved Doppler corrections in {}doppler_corrections.yaml.'
-          .format(exporting_folder))
+    print()
+    print('Saved Doppler corrections in {exporting_folder}doppler_corrections.yaml.')
 
 # Creation of a final file.
 
@@ -665,7 +665,8 @@ if args.selection:
     # Running of the class file.
     subprocess.run(['class', '@selection-grouping.class'])
     
-    print('\nCreated CLASS files:    (folder {})'.format(output_folder))
+    print()
+    print(f'Created CLASS files:    (folder {output_folder})')
     for file in output_files:
         print('- ' + file)
     print()
@@ -677,6 +678,7 @@ if args.rms_check:
     
     print('\nStarting noise check.\n')
     
+    os.chdir(config_folder + plots_folder)
     previous_images = glob.glob('*rms-*.png')
     for image in previous_images:
         os.remove(image)
@@ -705,7 +707,7 @@ if args.rms_check:
             
             for f, rms_freq_range in enumerate(rms_freq_ranges):
             
-                os.chdir(original_folder)
+                os.chdir(config_folder)
                 
                 rms_freq_range = 1000*np.array(rms_freq_range)
                 range_text = '({:g}-{:g})'.format(*rms_freq_range)
@@ -746,20 +748,17 @@ if args.rms_check:
                         if (type(bad_scans) == dict and not only_daily_bad_scans
                             and source in bad_scans and line in bad_scans[source]
                                 and telescope in bad_scans[source][line]):
-                            bad_scans_i += \
-                                parse_bad_scans(bad_scans[source][line]
-                                                [telescope])
+                            bad_scans_i += parse_bad_scans(bad_scans[source]
+                                                           [line][telescope])
                         for scan in set(bad_scans_i):
                             script += ['ignore /scan {}'.format(scan)]
                         # List of observations.
                         script += ['find /all', 'list'] 
                         if fold_spectra:
                             script += ['fold']
-                        script += ['set mode x {} {}'
-                                 .format(*rms_freq_range)]
+                        script += ['set mode x {} {}'.format(*rms_freq_range)]
                         script += ['for i 1 to found', 'get next']
-                        script += ['modify source --{}--{}'
-                                 .format(i+1,source)]
+                        script += ['modify source --{}--{}'.format(i+1,source)]
                         script += ['write', 'next']
                     
                     # End of the script.
@@ -770,7 +769,7 @@ if args.rms_check:
                     with open('rms_check.class', 'w') as file:
                         file.writelines(script)          
                     
-                    os.chdir(original_folder)
+                    os.chdir(config_folder)
                 
                     subprocess.run(['class', '@rms_check.class'])
                 
@@ -990,10 +989,10 @@ if args.rms_check:
                     
                     # Reduction of spectra in the rms regions.
                     
-                    os.chdir(config_folder)
-                    arguments = ['classreduction.py', exporting_folder,
-                                 ','.join(all_rms_spectra), '-smooth',
-                                 smooth_factor, '-plots_folder', plots_folder,
+                    os.chdir(original_folder)
+                    arguments = ['classreduction.py', config_folder + exporting_folder,
+                                 ','.join(all_rms_spectra), '-smooth', smooth_factor,
+                                 '-plots_folder', config_folder + plots_folder,
                                   '--rms_check']
                     if local_run:
                         os.chdir(original_folder)
@@ -1001,8 +1000,6 @@ if args.rms_check:
                         arguments = ['python3'] + arguments
                         if args.using_windows_py:
                             arguments[0] = 'py'
-                    if check_windows:
-                        arguments += ['--check_windows']
                     if save_plots:
                         arguments += ['--save_plots']
                     subprocess.run(arguments)
@@ -1049,8 +1046,7 @@ if args.rms_check:
                                             key = key_i
                                             break
                             if not key in telescope_effs:
-                                raise Exception('Missing {} beam efficiency.'
-                                                .format(key))
+                                raise Exception(f'Missing {key} beam efficiency.')
                             beam_eff = np.interp(mean_freq,
                                         telescope_effs[key]['frequency (GHz)'],
                                         telescope_effs[key]['beam efficiency'])
@@ -1062,8 +1058,8 @@ if args.rms_check:
                         
                     save_yaml_dict(rms_noises, exporting_folder +
                                    'rms_noises.yaml', default_flow_style=False)
-                    print('Saved calibrated RMS noises in {}rms_noises.yaml.'
-                          .format(exporting_folder))      
+                    print(f'Saved calibrated RMS noises in {exporting_folder}'
+                          'rms_noises.yaml.')      
                     
                     locs = np.arange(len(rms_ind))
                     labels = output_spectra_rms['rms_check-ind' + ext]
@@ -1080,7 +1076,7 @@ if args.rms_check:
                                       'rms_cum': rms_cum}
                     save_yaml_dict(rms_curve_dict, rms_curve_file,
                                    default_flow_style=None)
-                    print('Saved plot points in {}.'.format(rms_curve_file))
+                    print(f'Saved plot points in {rms_curve_file}.')
         
                 # Plotting of the rms evolution.
                 
@@ -1128,9 +1124,9 @@ if args.rms_check:
                     plt.figure(1)
                     
                 freqs = range_text[1:-1]
-                label_ind = '{} MHz, individual'.format(freqs)
-                label_cum = '{} MHz, cumulative'.format(freqs)
-                label_rms = ('final noise: {:.2f} mK'.format(rms_cum[-1]))
+                label_ind = f'{freqs} MHz, individual'
+                label_cum = f'{freqs} MHz, cumulative'
+                label_rms = f'final noise: {rms_cum[-1]:.2f} mK'
                 plt.plot(locs, rms_ind, '+', color=color, label=label_ind)
                 plt.plot(locs, rms_cum, '.', color=color, label=label_cum)
                 plt.plot([], [], '.', alpha=0, label=label_rms)
@@ -1166,10 +1162,9 @@ if args.rms_check:
                     plt.figure(2)
                     
                 plt.plot(locs, diff_rms_cum, '.', color=color,
-                        label='{} MHz, RMS variation'.format(range_text[1:-1]))
+                        label=f'{range_text[1:-1]} MHz, RMS variation')
                 plt.plot(locs, metric, '+', color=color,
-                         label='{} MHz, weighted RMS variation'
-                         .format(range_text[1:-1]))
+                         label=f'{range_text[1:-1]} MHz, weighted RMS variation')
                 plt.axhline(y=0, linestyle='--', linewidth=0.7, color='black')
                 for (i, metric_i) in enumerate(metric):
                     if metric_i > 0:
@@ -1247,30 +1242,27 @@ if args.rms_check:
                 
                 if f+1 == num_freq_ranges:
                     
-                    os.chdir(config_folder)
-                    os.chdir(os.path.realpath(plots_folder))
+                    os.chdir(config_folder + plots_folder)
                 
                     plt.figure(1)
-                    filename = 'rms-{}-{}{}.png'.format(title, group_size, s)
+                    filename = f'rms-{title}-{group_size}{s}.png'
                     plt.savefig(filename, dpi=400)
-                    print('Saved full RMS noise evolution in {}{}.'
-                          .format(plots_folder, filename))
+                    print(f'Saved full RMS noise evolution in {plots_folder}'
+                          f'{filename}.')
                     
                     plt.figure(2)
-                    filename = 'rms-metric-{}-{}{}.png'.format(title,
-                                                               group_size, s)
+                    filename = f'rms-metric-{title}-{group_size}{s}.png'
                     plt.savefig(filename, dpi=400)
-                    print('Saved RMS noise variation evolution in {}{}. '
-                          .format(plots_folder, filename))
+                    print(f'Saved RMS noise variation evolution in {plots_folder}'
+                          f'{filename}. ')
                     
                     if num_partial_plots > 1:
                         for i in range(num_partial_plots):
                             plt.figure(3+i)
-                            filename = 'rms-{}-{}{}-({}).png'.format(title,
-                                                            group_size, s, i+1)
+                            filename = f'rms-{title}-{group_size}{s}-({i+1}).png'
                             plt.savefig(filename, dpi=300)
-                            print('Saved partial RMS noise evolution in {}{}.'
-                                  .format(plots_folder, filename))
+                            print(f'Saved partial RMS noise evolution in {plots_folder}'
+                                  f'{filename}.')
                             
     plt.close('all')                 
     print()
@@ -1282,7 +1274,7 @@ if args.line_search:
     files_folder = config_folder + exporting_folder
     if args.use_julia:
         arguments = ['classlinesearch.jl', files_folder, ','.join(all_spectra),
-                     '--plots_folder', plots_folder,
+                     '--plots_folder', config_folder + plots_folder,
                      '--width', line_width, '--smooth', smooth_factor,
                      '--threshold', intensity_threshold]
         if local_run:
@@ -1291,7 +1283,7 @@ if args.line_search:
             arguments = ['julia'] + arguments
     else:
         arguments = ['classlinesearch.py', files_folder, ','.join(all_spectra),
-                     '-plots_folder', plots_folder,
+                     '-plots_folder', config_folder + plots_folder,
                      '-width', line_width, '-smooth', smooth_factor,
                      '-threshold', intensity_threshold]
         if local_run:
@@ -1317,7 +1309,7 @@ if args.reduction:
         args.use_julia = False
     if args.use_julia:
         arguments = ['classreduction.jl', files_folder, ','.join(all_spectra),
-                     '--plots_folder', plots_folder,
+                     '--plots_folder', config_folder + plots_folder,
                      '--smooth', smooth_factor,
                      '--rms_margin', rms_margin]
         if local_run:
@@ -1327,7 +1319,7 @@ if args.reduction:
             arguments = ['julia'] + arguments
     else:
         arguments = ['classreduction.py', files_folder, ','.join(all_spectra),
-                     '-plots_folder', plots_folder,
+                     '-plots_folder', config_folder + plots_folder,
                      '-smooth', smooth_factor,
                      '-rms_margin', rms_margin]
         if local_run:
@@ -1383,7 +1375,7 @@ if args.reduction:
                                 key = key_i
                                 break
                 if not key in telescope_effs:
-                    raise Exception('Missing {} beam efficiency.'.format(key))
+                    raise Exception(f'Missing {key} beam efficiency.')
                 beam_eff = np.interp(mean_freq,
                                      telescope_effs[key]['frequency (GHz)'],
                                      telescope_effs[key]['beam efficiency'])
@@ -1397,17 +1389,17 @@ if args.reduction:
         
         save_yaml_dict(rms_noises, exporting_folder + 'rms_noises.yaml',
                        default_flow_style=False)
-        print('Saved calibrated RMS noises in {}rms_noises.yaml.'
-              .format(exporting_folder))
+        print(f'Saved calibrated RMS noises in {exporting_folder}'
+              'rms_noises.yaml.')
     
         save_yaml_dict(beam_effs, exporting_folder + 'beam_efficiencies.yaml',
                        default_flow_style=False)
-        print('Saved beam efficiencies in {}beam_efficiencies.yaml.\n'
-              .format(exporting_folder))
+        print(f'Saved beam efficiencies in {exporting_folder}'
+              'beam_efficiencies.yaml.')
+        print()
     
     # End of the script.
     script += ['exit']
-    print(script)
     script = [line + '\n' for line in script]
     # Writing of the class file.
     with open('reduction-grouping-1.class', 'w') as file:
@@ -1450,7 +1442,7 @@ if args.reduction:
     # Running of the class file.
     subprocess.run(['class', '@reduction-grouping-2.class'])
     
-    print('\nCreated CLASS files:    (folder {})'.format(output_folder))
+    print(f'\nCreated CLASS files:    (folder {output_folder})')
     for file in output_files:
         print('- ' + file.replace(ext, '-r'+ext))
     print()
@@ -1619,7 +1611,7 @@ if args.spectra_tables:
         file_name = source + '-' + extra_note + '-table.csv'
         file_name = file_name.replace('--','-')
         table.to_csv(exporting_folder + file_name, sep=',', index=False)
-        print('Saved file {}{}.'.format(exporting_folder, file_name))
+        print(f'Saved file {exporting_folder}{file_name}.')
     
         if average_all_input_files:
         
@@ -1671,7 +1663,7 @@ if args.spectra_tables:
                 file_name = source + '-' + extra_note + '-table-joint.csv'
                 file_name = file_name.replace('--','-')
                 table.to_csv(exporting_folder + file_name, sep=',', index=False)
-                print('Saved file {}{}.'.format(exporting_folder, file_name))
+                print(f'Saved file {exporting_folder}{file_name}.')
     
     print()
             
@@ -1686,7 +1678,7 @@ if args.check_rms_plots:
     for option_list in rms_option_list:
         
         plt.close('all')
-        os.chdir(original_folder)
+        os.chdir(config_folder)
     
         rms_params = (options['rms noise check'][option_list]
                       ['source-line-telescopes'])
@@ -1704,8 +1696,7 @@ if args.check_rms_plots:
         
         for telescope in telescopes:
             
-            os.chdir(original_folder)
-            os.chdir(exporting_folder)
+            os.chdir(config_folder + exporting_folder)
             
             image_prefix = 'rms-spectrum-' + '-'.join([source, line, telescope])
             file_prefix = 'rms-' + '-'.join([source, line, telescope, s])
@@ -1713,8 +1704,7 @@ if args.check_rms_plots:
             number_file = glob.glob(file_prefix + '*-filenames.csv')[0]
             number_table = pd.read_csv(number_file)
     
-            os.chdir(original_folder)
-            os.chdir(plots_folder)
+            os.chdir(config_folder + plots_folder)
             
             for frequency_range in rms_freq_ranges:
                 
@@ -1751,11 +1741,11 @@ if args.check_rms_plots:
                     plt.axis('off')
                     plt.tight_layout()
                     plt.pause(0.1)
-                    print('File {}'.format(image))
+                    print(f'File {image}')
                     image_elements = image.replace('rms-spectrum-','').split('-')
                     source = image_elements[0]
                     line = image_elements[1]
-                    telescope = '*{}*'.format(image_elements[2])
+                    telescope = f'*{image_elements[2]}*'
                     scans = image_elements[-1].replace('.png','')
                     
                     if not scans.startswith('to'):
@@ -1771,7 +1761,7 @@ if args.check_rms_plots:
                         scans = scans.split('+')
                         scan1 = number_table['scan'][int(scans[0])-1]
                         scan2 = number_table['scan'][int(scans[-1])-1]
-                        bad_scans_i = '{}:{}'.format(scan1, scan2)
+                        bad_scans_i = f'{scan1}:{scan2}'
                         if source not in bad_scans:
                             bad_scans[source] = {}
                         if line not in bad_scans[source]:
@@ -1795,13 +1785,13 @@ if args.check_rms_plots:
                 
     bad_scans = {'bad scans': bad_scans}
     
-    os.chdir(original_folder)
-    os.chdir(config_folder.replace('.','') + exporting_folder.replace('./','')) 
+    os.chdir(config_folder + exporting_folder)
     
     # Export of the bad scans.
     save_yaml_dict(bad_scans, 'bad_scans.yaml', default_flow_style=None)
-    print('\nSaved selected bad scans in {}bad_scans.yaml.\n'
-          .format(exporting_folder))
+    print()
+    print(f'Saved selected bad scans in {exporting_folder}bad_scans.yaml.')
+    print()
                 
     plt.close('all')
                              
@@ -1826,8 +1816,7 @@ for file in temp_files:
 time2 = time.time()
 total_time = int(time2 - time1)
 minutes, seconds = total_time//60, total_time%60
-text = ('The processing of the data has finished in {} min + {} s.'
-        .format(minutes, seconds))
+text = f'The processing of the data has finished in {minutes} min + {seconds} s.'
 if minutes == 0:
     text = text.replace('0 min + ', '')
     if seconds == 0:
