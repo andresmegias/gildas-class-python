@@ -578,7 +578,7 @@ os.chdir(args.folder)
 
 # Change backend and remove keymaps for interactive mode.
 if args.check_windows:
-    if not platform.platform.startswith('macOS'):
+    if not platform.platform().startswith('macOS'):
         plt.matplotlib.use('qtagg')
     keymaps = ('back', 'copy', 'forward', 'fullscreen', 'grid', 'grid_minor',
                'help', 'home', 'pan', 'quit', 'quit_all', 'save', 'xscale',
