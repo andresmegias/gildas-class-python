@@ -58,15 +58,15 @@ def full_path(text):
     path = str(os.path.realpath(path))
     return path
 
-def get_windows(x, cond, margin=0.0, width=10.0):
+def get_windows(x, mask, margin=0.0, width=10.0):
     """
-    Return the windows of the empty regions of the input array.
+    Return the windows of the masked regions of the input array.
 
     Parameters
     ----------
     x : array
         Input data.
-    cond : array (bool)
+    mask : array (bool)
         Indices of the empty regions of data.
     margin : float, optional
         Relative margin added to the windows found initially.
@@ -85,7 +85,7 @@ def get_windows(x, cond, margin=0.0, width=10.0):
     separation = abs(np.diff(x))
     reference = np.median(separation)
     all_inds = np.arange(N)
-    var_inds = np.diff(np.concatenate(([0], np.array(cond, dtype=int), [0])))
+    var_inds = np.diff(np.concatenate(([0], np.array(mask, dtype=int), [0])))
     cond1 = (var_inds == 1)[:-1]
     cond2 = (var_inds == -1)[1:]
     inds = np.append(all_inds[cond1], all_inds[cond2])
@@ -106,11 +106,16 @@ def get_windows(x, cond, margin=0.0, width=10.0):
             windows = np.delete(windows, i+1, axis=0)
         else:
             i += 1
-    windows = np.maximum(x[0], windows)
-    windows = np.minimum(windows, x[-1])
+    if windows[0,0] <= x[0]:
+        windows = np.delete(windows, 0, axis=0)
+    if windows[-1,1] >= x[-1]:
+        windows = np.delete(windows, -1, axis=0)
+    for (i, (x1, x2)) in enumerate(windows):
+        if abs(x2 - x1) > 8.*width:
+            windows = np.delete(windows, i, axis=0)
     return windows
 
-def regions_args(x, wins):
+def regions_args(x, windows):
     """
     Select the regions of the input array specified by the given windows.
 
@@ -123,13 +128,13 @@ def regions_args(x, wins):
 
     Returns
     -------
-    cond : array (bool)
-        Resultant condition array.
+    mask : array (bool)
+        Resultant mask array.
     """
-    cond = np.ones(len(x), dtype=bool)
-    for x1, x2 in wins:
-        cond *= (x < x1) + (x > x2)
-    return cond
+    mask = np.ones(len(x), dtype=bool)
+    for (x1, x2) in windows:
+        mask *= (x < x1) + (x > x2)
+    return mask
 
 def rolling_function(func, y, size, **kwargs):
     """
@@ -271,7 +276,7 @@ def fit_baseline(x, y, windows, smooth_size):
 def identify_lines(x, y, smooth_size, line_width, sigmas, iters=2,
                    rolling_sigma_clip=False):
     """
-    Identify the lines of the spectrum and fits the baseline.
+    Identify the lines of the spectrum and fit the baseline.
 
     Parameters
     ----------
@@ -423,7 +428,12 @@ for file in args.file.split(','):
         
     #%% Plots.
     
-    if args.save_plots:   
+    if args.save_plots:
+        
+        y_lims = [np.quantile(intensity, 1e-3), np.quantile(intensity, 1.-1e-3)]
+        y_lims = [y_lims[0] - np.diff(y_lims)/10, y_lims[1] + np.diff(y_lims)/10]
+        yr_lims = [np.quantile(intensity_red, 5e-4), np.quantile(intensity_red, 1.-5e-4)]
+        yr_lims = [yr_lims[0] - np.diff(yr_lims)/5, yr_lims[1] + np.diff(yr_lims)/5]
         
         fig = plt.figure(1, figsize=(10,7))
         plt.clf()
@@ -434,23 +444,26 @@ for file in args.file.split(','):
         for x1, x2 in windows:
             plt.axvspan(x1, x2, color='gray', alpha=0.3)
         plt.plot(frequency, intensity_cont, 'tab:green', label='fitted baseline')
+        plt.locator_params(axis='both', nbins=10)
         plt.ticklabel_format(style='sci', useOffset=False)
         plt.margins(x=0)
+        plt.ylim(y_lims)
         plt.xlabel('frequency (MHz)')
         plt.ylabel('original intensity (K)')
         plt.legend(loc='upper right')
+        plt.title('Full spectrum - {}'.format(file), fontweight='semibold', pad=12.)
     
         plt.subplot(2,1,2, sharex=sp1)
-        for x1, x2 in windows:
+        for (x1, x2) in windows:
             plt.axvspan(x1, x2, color='gray', alpha=0.3)
         plt.step(frequency, intensity_red, where='mid', color='black')
+        plt.locator_params(axis='both', nbins=10)
         plt.ticklabel_format(style='sci', useOffset=False)
         plt.margins(x=0)
+        plt.ylim(yr_lims)
         plt.xlabel('frequency (MHz)')
         plt.ylabel('reduced intensity (K)')
 
-        plt.suptitle('Full spectrum - {}'.format(file),
-                     fontweight='semibold')
         fig.align_ylabels()
         plt.tight_layout(pad=0.7, h_pad=1.0)
 
@@ -472,6 +485,7 @@ for file in args.file.split(','):
                 plt.step(xj, yrj, where='mid', color='black')
                 plt.axvspan(x1, x2, color='gray', alpha=0.2)
                 plt.margins(x=0, y=0.1)
+                plt.locator_params(axis='both', nbins=10)
                 if j+1 > min(15*(i+1), num_lines) - 5:
                     plt.xlabel('frequency (MHz)')
                 if j%5 == 0:
@@ -493,12 +507,12 @@ for file in args.file.split(','):
             os.chdir(original_folder)
             os.chdir(full_path(args.plots_folder))
             plt.figure(1)
-            plt.savefig('spectrum-{}.png'.format(file), dpi=200)
+            plt.savefig('spectrum-{}.png'.format(file))
             print("    Saved plot in {}spectrum-{}.png."
                   .format(args.plots_folder, file))
             for i in range(num_plots):
                 plt.figure(2+i)
-                plt.savefig('lines-{}_{}.png'.format(file, i+1), dpi=200)
+                plt.savefig('lines-{}_{}.png'.format(file, i+1))
                 print("    Saved plot in {}lines-{}_{}.png."
                       .format(args.plots_folder, file, i+1))
             print()

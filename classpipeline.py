@@ -261,7 +261,6 @@ default_options = {
         'smoothing factor': 40
         },
     'merging': 'auto',
-    'only rms plots': False
     }
 
 default_rms_opts = {
@@ -354,7 +353,7 @@ if 'rms noise check' in options:
 if frequency_units == 'MHz':
       to_GHz = 0.001
 elif frequency_units == 'GHz':
-      to_GHz = 1.0
+      to_GHz = 1.
 
 # Checks and setting of the common options.
 if not data_folder.endswith(sep):
@@ -365,7 +364,7 @@ if not output_folder.endswith(sep):
     output_folder += sep
 if not plots_folder.endswith(sep):
     plots_folder += sep
-if len(input_files) == 0:
+if len(input_files) == 0 and not args.merging:
     raise Exception('There are no input files specified.')
 if not os.path.isdir(full_path(data_folder)):
     raise Exception(f'Folder {data_folder} does not exist.')
@@ -765,12 +764,10 @@ if args.rms_check:
                     script += ['exit']
                     script = [line + '\n' for line in script]
                  
-                    # Writing of the class file.
+                    # Writing and running of the class file.
+                    os.chdir(config_folder)
                     with open('rms_check.class', 'w') as file:
                         file.writelines(script)          
-                    
-                    os.chdir(config_folder)
-                
                     subprocess.run(['class', '@rms_check.class'])
                 
                     # Class file for obtaining the information of each
@@ -1137,13 +1134,13 @@ if args.rms_check:
                                     color=color, alpha=0.6)
                 for i in range(len(file_nums)-1):
                     if file_nums[i+1] != file_nums[i]:
-                        plt.axvline(x=(i+0.5)/group_size, ymin=0, ymax=1,
-                                    linestyle='-', color='gray', linewidth=3,
+                        plt.axvline(x=(i+0.5)/group_size, ymin=0., ymax=1.,
+                                    linestyle='-', color='gray', linewidth=3.,
                                     alpha=0.3, clip_on=True)
                         
                 if f+1 == num_freq_ranges:
                     plt.margins(x=0.01)
-                    plt.xticks(ticks=locs, labels=labels_red, rotation=90,
+                    plt.xticks(ticks=locs, labels=labels_red, rotation=90.,
                                fontsize=fontsize)
                     plt.yscale('log')
                     plt.tick_params(right=True, which='both')
@@ -1222,12 +1219,12 @@ if args.rms_check:
                             for i in range(len(file_nums)-1):
                                 if file_nums[i+1] != file_nums[i]:
                                     plt.axvline(x=(i+0.5)/group_size,
-                                                ymin=0, ymax=1, linestyle='-',
-                                                color='gray', linewidth=3,
+                                                ymin=0., ymax=1., linestyle='-',
+                                                color='gray', linewidth=3.,
                                                 alpha=0.3, clip_on=True)
                             plt.xlim(xlims)
                             plt.xticks(ticks=locs[i1:i2], labels=labels[i1:i2],
-                                       rotation=90, fontsize=fontsize)
+                                       rotation=90., fontsize=fontsize)
                             plt.yscale('log')
                             plt.tick_params(right=True, which='both')
                             plt.gca().yaxis.set_minor_formatter(
@@ -1505,8 +1502,22 @@ if args.merging:
     config_merging['spectra folder'] = exporting_folder
     config_merging['output folder'] = output_folder
     config_merging['plots folder'] = plots_folder
-    config_merging['input files'] = options['merging']
     
+    if 'grouping' in options:
+        # Creation of a CLASS script to create a CLASS file containing all the
+        # spectra to be merged.
+        script = []
+        for output_file in options['grouping']:
+            script += ['file out {} m /overwrite'.format(output_folder + output_file)]
+            for input_file in options['grouping'][output_file]:
+                script += ['file in {}'.format(output_folder + input_file)]
+                script += ['find /all', 'list', 'get first', 'write']
+        script += ['exit']
+        script = [line + '\n' for line in script]
+        with open('merging-grouping.class', 'w') as file:
+            file.writelines(script)
+        subprocess.run(['class', '@merging-grouping.class'])
+
     if options['merging'] == 'auto':
         config_merging['input files'] = {}
         for source in list(np.unique(sources)):
@@ -1547,6 +1558,8 @@ if args.merging:
             config_merging['input files'][file_name]['all spectra'] = all_spectra
             config_merging['input files'][file_name]['overlapping spectra'] = \
                 averaged_spectra
+    else:
+        config_merging['input files'] = options['merging']
 
     save_yaml_dict(config_merging, 'config-merging-auto.yaml',
                    default_flow_style=False)

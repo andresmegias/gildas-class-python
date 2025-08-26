@@ -6,7 +6,7 @@ Automated GILDAS-CLASS Pipeline
 Averaging mode
 Version 1.3
 
-Copyright (C) 2024 - Andrés Megías Toledano
+Copyright (C) 2025 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -604,72 +604,6 @@ def get_rms_noise(x, y, windows=[], sigmas=4., iters=3):
     rms_noise = np.sqrt(np.mean(y**2)) 
     return rms_noise
 
-def find_rms_region(x, y, rms_noise, windows=[], rms_threshold=0.1,
-                    offset_threshold=0.05, reference_width=200, min_width=120,
-                    max_iters=1000):
-    """
-    Find a region of the input data that has a similar noise than the one given.
-
-    Parameters
-    ----------
-    x : array
-        Independent variable.
-    y : array
-        Dependent variable.
-    rms_noise : float
-        The value of the RMS used as a reference.
-    windows : array, optional
-        The frequency windows of the regions that should be ignored.
-        The default is [].
-    rms_threshold : float, optional
-        Maximum relative difference that can exist between the RMS noise of the
-        searched region and the reference RMS noise. The default is 0.1.
-    offset_threshold : float, optional
-        Maximum value, in units of the reference RMS noise, that the mean value
-        of the independent variable can have in the searched region.
-        The default is 0.05.
-    reference_width : int, optional
-        Size of the desired region, in number of channels. The default is 200.
-    min_width : int, optional
-        Minimum size of the desired region, in number of channels.
-        The default is 120.
-    max_iters : int, optional
-        Maximum number of iterations that will be done to find the desired
-        region. The default is 1000.
-
-    Returns
-    -------
-    rms_region : list
-        Frequency regions of the desired region.
-    """
-    i = 0
-    local_rms = 0
-    offset = 1*rms_noise
-    while not (abs(local_rms - rms_noise) / rms_noise < rms_threshold
-               and abs(offset) < offset_threshold * rms_noise):
-        width = max(min_width, args.smooth)
-        resolution = np.median(np.diff(x))
-        central_freq = np.random.uniform(x[0] + width/2*resolution,
-                                         x[-1] - width/2*resolution)
-        region_inf = central_freq - width/2*resolution
-        region_sup = central_freq + width/2*resolution
-        cond = (x > region_inf) & (x < region_sup)
-        y = y[cond]
-        valid_range = True
-        for x1, x2 in windows:
-            if (region_inf < x1 < region_sup) or (region_inf < x2 < region_sup):
-                valid_range = False
-        if valid_range:
-            local_rms = 1e3 * float(np.sqrt(np.mean(y**2)))
-            offset = 1e3 * np.mean(y)
-        i += 1
-        if i > max_iters:
-            rms_region = []
-            break
-        rms_region = [float(central_freq - width/2*resolution),
-                      float(central_freq + width/2*resolution)]
-    return rms_region
-
 def get_formatted_dictionary(dictionary, previous_name='', previous_index=0,
                              internal_use=False):
     """
@@ -685,7 +619,7 @@ def get_formatted_dictionary(dictionary, previous_name='', previous_index=0,
     previous_index : int, optional
         Variable used internally to determine the level of nesting for the new
         dictionary.
-    internal use : bool, optional
+    internal_use : bool, optional
         Variable used for recursively calling the function internaly.
 
     Returns
@@ -693,17 +627,15 @@ def get_formatted_dictionary(dictionary, previous_name='', previous_index=0,
     new_dict_list : list(dict)
         List that contains one dictionary with the desired format for each
         level of indentation in the original dictionary.
-    new_name : str
-        Variable used internally to create the sections name for the new
-        dictionary.
+    final_names : list
+        List of correct final file names.
     """
     new_dict = {}
     final_names = []
     prev_first_alt = ''
     for (name,item) in zip(dictionary.keys(), dictionary.values()):
         previous_name = previous_name
-        new_name = ((previous_name + '-'*(previous_name != '') + name)
-                    )
+        new_name = (previous_name + '-'*(previous_name != '') + name)
         first = new_name.split('-')[0]
         first_alt = '-'.join(name.split('-')[:-1])
         new_name = (new_name.replace(first+'-'+first, first)
@@ -739,7 +671,6 @@ def get_formatted_dictionary(dictionary, previous_name='', previous_index=0,
             new_name = '-'.join(splitted_name[1:])
             new_dict_list[i][new_name] = new_dict[name]
         new_dict_list = list(reversed(new_dict_list))
-        final_names = np.array(final_names)
         return new_dict_list, final_names
 
 #%%
@@ -805,10 +736,10 @@ if 'ghost lines' in config:
     options['ghost lines'] = {**default_options['ghost lines'],
                               **config['ghost lines']}
 clean = options['ghost lines']['clean lines']
-abs_threshold = options['ghost lines']['absolute intensity threshold (rms)']
-rel_threshold = options['ghost lines']['relative intensity threshold']
-lines_margin = options['ghost lines']['margin']
-size = options['ghost lines']['smoothing factor']
+abs_threshold = float(options['ghost lines']['absolute intensity threshold (rms)'])
+rel_threshold = float(options['ghost lines']['relative intensity threshold'])
+lines_margin = int(options['ghost lines']['margin'])
+size = int(options['ghost lines']['smoothing factor'])
 sources_lines_telescopes = options['sources-lines-telescopes']
 default_telescopes = options['default telescopes']
 averaged_files = options['averaged spectra']
@@ -827,6 +758,20 @@ for source in sources_lines_telescopes:
     for line in sources_lines_telescopes[source]:
         if sources_lines_telescopes[source][line] == 'default':
             sources_lines_telescopes[source][line] = default_telescopes
+linewidth = 0.1
+yticks = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09,
+          0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
+          1., 2., 3., 4., 5., 6., 7., 8., 9.,
+          0, 10., 100., 1000., 10000.]
+yticklabels = [0.01, '', '', '', 0.05, '', '', '', '',
+               0.1, '', '', '', '', '', '', '', '',
+               1, '', '', '', '', '', '', '', '',
+              '0', 10, 100, 1000, 10000]
+yticks += [-y for y in yticks]
+for y in copy.copy(yticklabels):
+    if y not in ('', '0'):
+        y = '$-$'+str(y)
+    yticklabels += [y]
 
 # Checks.
 if not spectra_folder.endswith(separator):
@@ -850,10 +795,16 @@ skip_plots = False
 
 with open(spectra_folder + 'rms_noises.yaml') as file:
     rms_noises = yaml.safe_load(file)
+with open(spectra_folder + 'rms_regions.yaml') as file:
+    rms_regions = yaml.safe_load(file)
 with open(spectra_folder + 'doppler_corrections.yaml') as file:
     doppler_corr = yaml.safe_load(file)
 with open(spectra_folder + 'frequency_windows.yaml') as file:
     frequency_windows = yaml.safe_load(file)
+with open(spectra_folder + 'frequency_ranges.yaml') as file:
+    frequency_ranges = yaml.safe_load(file)
+with open(spectra_folder + 'reference_frequencies.yaml') as file:
+    reference_frequencies = yaml.safe_load(file)
 
 # for ext_ in [ext, '.dat', '.fits']:
 #     prev_files = Path(output_folder + all_subfolder).glob('**/*-a*'+ext_)
@@ -864,6 +815,9 @@ with open(spectra_folder + 'frequency_windows.yaml') as file:
 #%% Calculations. Averaging and grouping into same CLASS files.
 
 files_list, final_names = get_formatted_dictionary(averaged_files)
+for (i, name) in enumerate(final_names):
+    if extra_note != '' and  '-'+extra_note not in name:
+        final_names[i] = name + '-'+extra_note
 
 # CLASS file for doing the averages without reducing, to get the file info.
 all_spectra = []
@@ -874,7 +828,7 @@ for files in files_list:
     script = []
     
     for title in files:
-        
+            
         telescopes = ['']
         for source in sources_lines_telescopes:
             for line in sources_lines_telescopes[source]:
@@ -890,6 +844,8 @@ for files in files_list:
             if telescope != '':
                 telescope = '-' + telescope
             output_spectrum = title + telescope
+            if extra_note != '' and '-'+extra_note not in output_spectrum:
+                output_spectrum += '-'+extra_note
             script += ['file out {}{}{}-a-temp{} m /overwrite'
                       .format(output_folder, all_subfolder, output_spectrum, ext)]
             for element in files[title]:
@@ -953,6 +909,8 @@ temp_files = Path(output_folder + all_subfolder).glob('**/*temp'+ext)
 temp_files = [str(pp) for pp in temp_files]
 for file in temp_files:
     os.remove(file)           
+plt.figure(1, figsize=(14.,8.))
+
 
 # Averaging of the spectra and grouping into CLASS files.
             
@@ -982,13 +940,15 @@ for files in files_list:
             if telescope != '':
                 telescope = '-' + telescope
                 
-            output_spectrum = '{}{}-r'.format(title, telescope)
+            output_spectrum = title + telescope
+            if extra_note != '' and '-'+extra_note not in output_spectrum:
+                output_spectrum += '-'+extra_note
             xx, yy, noises, weights, windows_groups, obs_times, beam_effs = \
                 [], [], [], [], [], [], []
             mads = []
                 
             num_spectra = len(files[title])    
-            plt.figure(1, figsize=(14,8))
+            plt.figure(1)
             plt.clf()
             
             for (i,element) in enumerate(files[title]):
@@ -996,8 +956,10 @@ for files in files_list:
                 input_spectrum = ('{}-{}{}-r'.format(title, element, telescope)
                                   .replace(title+'-'+title, title))
                 if (len(extra_note) > 0
-                        and input_spectrum.count('-' + extra_note) > 1):
-                    input_spectrum = input_spectrum.replace(extra_note + '-', '')
+                        and input_spectrum.count('-'+extra_note) > 1):
+                    input_spectrum = input_spectrum.replace(extra_note+'-', '')
+                if not os.path.exists(spectra_folder + input_spectrum + '.dat'):
+                    input_spectrum += '-a'
                 # Loading of the data files.
                 file_path = spectra_folder + input_spectrum
                 data = np.loadtxt(file_path + '.dat')
@@ -1008,7 +970,7 @@ for files in files_list:
                 fits_data = hdul[0].data
                 obs_time = hdul[0].header['obstime']
                 beam_eff = hdul[0].header['beameff']
-                input_spectrum = input_spectrum.replace('-r','')
+                input_spectrum = input_spectrum.replace('-r','').replace('-a', '')
                 noise = rms_noises[input_spectrum] * to_K
                 windows = frequency_windows[input_spectrum]
                 # Storing of the data.
@@ -1022,7 +984,6 @@ for files in files_list:
                 # Plot.
                 color = hsv_to_rgb((i/len(files[title]), 1, 0.8))
                 alpha = 0.3 + 0.7/len(files[title])
-                linewidth = 0.1
                 plt.step(frequency, intensity, where='mid', color=color,
                          alpha=alpha, lw=linewidth)
                 plt.step([], [], where='mid', color=color, alpha=alpha,
@@ -1042,26 +1003,38 @@ for files in files_list:
                 plt.figure(1)
                 plt.step(final_frequency, final_intensity, where='mid',
                          color='black', alpha=1, lw=linewidth)
-                plt.step([], [], where='mid', color='black',
-                         label=output_spectrum.replace('-r',''))
+                plt.step([], [], where='mid', color='black', label=output_spectrum)
                 for (w1,w2) in windows:
                     plt.axvspan(w1, w2, color='gray', alpha=0.5)
                 plt.margins(x=0)
+                plt.locator_params(axis='both', nbins=12)
                 plt.xlabel('frequency (MHz)')
                 plt.ylabel('reduced intensity (K)')
                 if len(intensity_limits) > 0:
                     plt.ylim(intensity_limits)
                 else:
                     plt.yscale('symlog', linthresh=0.1)
-                    plt.gca().yaxis.set_minor_formatter(ScalarFormatter())
-                    plt.gca().yaxis.set_major_formatter(ScalarFormatter())
-                plt.title(output_spectrum.replace('-r',''), fontweight='bold')
+                    # plt.gca().yaxis.set_minor_formatter(ScalarFormatter())
+                    # plt.gca().yaxis.set_major_formatter(ScalarFormatter())
+                y1, y2 = plt.ylim()
+                yticks_ = copy.copy(yticks)
+                yticklabels_ = copy.copy(yticklabels)
+                i = 0
+                for y in yticks:
+                    if y < y1 or y > y2 or (y2-y1) > 20. and abs(y) == 0.01:
+                        del yticks_[i]
+                        del yticklabels_[i]
+                    else:
+                        i += 1
+                plt.yticks(yticks_, yticklabels_)
+                plt.title(output_spectrum, fontweight='bold', pad=10.)
                 fontsize = 12. - 4.*min(1, num_spectra/20)
                 ncol = max(1, num_spectra//8)
                 plt.legend(fontsize=fontsize, ncol=ncol)
                 plt.tight_layout()
-                plt.savefig(plots_folder + 'averaged-' + output_spectrum + '.pdf',
-                            dpi=200)
+                filename = plots_folder + 'averaged-' + output_spectrum + '.pdf'
+                plt.savefig(filename)
+                plt.plot(f'Saved plot in {filename}.')
                 if args.plots and not skip_plots:
                     plt.pause(0.1)
                     plt.show(block=False)
@@ -1078,17 +1051,21 @@ for files in files_list:
                 # New noise.
                 new_windows = []
                 for windows in windows_groups:
-                    for x1,x2 in windows:
+                    for (x1,x2) in windows:
                         new_windows += [[float(x1), float(x2)]]
                 reference_width = np.median(np.diff(new_windows, axis=1))
                 new_noise = get_rms_noise(final_frequency, final_intensity,
                                           windows=new_windows)
-                rms_noises[output_spectrum.replace('-r','')] = float(1e3*new_noise)
-                frequency_windows[output_spectrum.replace('-r','')] = new_windows
+                new_freq_range = [float(final_frequency[0]), float(final_frequency[-1])]
+                rms_noises[output_spectrum] = float(1e3*new_noise)
+                rms_regions[output_spectrum] = rms_regions[input_spectrum]
+                frequency_windows[output_spectrum] = new_windows
+                frequency_ranges[output_spectrum] = new_freq_range
+                reference_frequencies[output_spectrum] = \
+                    reference_frequencies[input_spectrum]
          
                 # Output.
-                file_path = spectra_folder + \
-                    (output_spectrum + '.fits').replace('-r.fits', '.fits')
+                file_path = spectra_folder + output_spectrum + '-a.fits'
                 hdul = fits.open(file_path)
                 fits_data = np.float32(np.zeros((1,1,1,len(final_intensity))))
                 fits_data[0,0,0,:] = np.float32(final_intensity)
@@ -1101,7 +1078,7 @@ for files in files_list:
                 ind_ref = 1 + (rest_freq - initial_freq) / resolution
                 show_diagnostic_plot = False
                 if show_diagnostic_plot:
-                    plt.figure(7)
+                    plt.figure(2)
                     plt.plot(final_frequency*to_MHz*1e6,
                              1 + np.arange(len(final_frequency)))
                     plt.axvline(rest_freq)
@@ -1124,15 +1101,14 @@ for files in files_list:
                     max_chars = 10
                     if len(lines) > 0:
                         hdul[0].header['line'] = lines
-                hdul.writeto(spectra_folder + output_spectrum + '-a.fits',
+                hdul.writeto(spectra_folder + output_spectrum + '-r-a.fits',
                              overwrite=True)
                 hdul.close()
-                print('Saved reduced spectrum in {}-a.fits.'.format(output_spectrum))
-                script += ['fits read {}-a.fits'
+                print('Saved reduced spectrum in {}-r-a.fits.'.format(output_spectrum))
+                script += ['fits read {}-r-a.fits'
                            .format(spectra_folder + output_spectrum)]
-                script += ['modify doppler {}'
-                           .format(doppler_corr[output_spectrum.replace('-r','')])]
-                script += ['greg {}{}-a.dat /formatted'
+                script += ['modify doppler {}'.format(doppler_corr[output_spectrum])]
+                script += ['greg {}{}-r-a.dat /formatted'
                            .format(spectra_folder, output_spectrum)]
                 
     script += ['exit']
@@ -1144,13 +1120,28 @@ for files in files_list:
 
 # Export of the rms noise of each spectrum.
 save_yaml_dict(rms_noises, spectra_folder + 'rms_noises.yaml',
-                  default_flow_style=None)
-print('Saved RMS noises in {}rms_noises.yaml.'.format(spectra_folder))
+               default_flow_style=None)
+print('Saved RMS noises in '+spectra_folder+'rms_noises.yaml.')
+
+# Export of the rms regions of each spectrum.
+save_yaml_dict(rms_regions, spectra_folder + 'rms_regions.yaml',
+               default_flow_style=None)
+print('Saved RMS regions in '+spectra_folder+'rms_regions.yaml')
 
 # Export of the frequency windows of each spectrum.
 save_yaml_dict(frequency_windows, spectra_folder + 'frequency_windows.yaml',
-                  default_flow_style=None)
-print('Saved frequency windows in {}frequency_windows.yaml.'.format(spectra_folder))    
+               default_flow_style=None)
+print('Saved frequency windows in '+spectra_folder+'frequency_windows.yaml.')
+
+# Export of the frequency ranges of each spectrum.
+save_yaml_dict(frequency_ranges, spectra_folder + 'frequency_ranges.yaml',
+               default_flow_style=None)
+print('Saved frequency windows in '+spectra_folder+'frequency_ranges.yaml.')
+
+# Export of the reference frequencies of each spectrum.
+save_yaml_dict(reference_frequencies, spectra_folder + 'reference_frequencies.yaml',
+               default_flow_style=None)
+print('Saved frequency windows in '+spectra_folder+'reference_frequencies.yaml.')
 
 # Combining of the spectra into CLASS files including telescopes.
 
@@ -1158,7 +1149,7 @@ print('Saved frequency windows in {}frequency_windows.yaml.'.format(spectra_fold
 final_spectra = {}
 script = ['']
 for name in final_names:
-    class_file = name + '-r' + ext
+    class_file = name + '-r-a' + ext
     script += ['file out {}{} m /overwrite'.format(output_folder, class_file)]
     telescopes = ['']
     for source in sources_lines_telescopes:
@@ -1181,6 +1172,8 @@ for name in final_names:
         if telescope != '':
             input_spectrum += '-'+telescope
         input_path = '{}{}-r.fits'.format(spectra_folder, input_spectrum)
+        if not os.path.exists(input_path):
+            input_path = input_path.replace('-r.fits', '-r-a.fits')
         script += ['fits read ' + input_path]
         script += ['modify doppler {}'.format(doppler_corr[input_spectrum])]
         script += ['write']
@@ -1196,9 +1189,9 @@ print()
 # Creation of a CLASS script to group the files by source.
 script = ['']
 for source in sources_lines_telescopes:
-    output_path = '{}{}-all-r{}'.format(output_folder, source, ext)
+    output_path = '{}{}-all-r-a{}'.format(output_folder, source, ext)
     script += ['file out {} m /overwrite'.format(output_path)]
-    files_source = [name+'-r'+ext for name in final_names if name.startswith(source)]
+    files_source = [name+'-r-a'+ext for name in final_names if name.startswith(source)]
     for file in files_source:
         script += ['file in {}{}'.format(output_folder, file)]
         script += ['find /all']
@@ -1215,10 +1208,11 @@ print()
 # Final files.
 print('Created CLASS files:    (folder {})'.format(output_folder))
 for name in final_names:
-    class_file = name + '-r' + ext
+    class_file = name + '-r-a' + ext
     print('- ' + class_file)
 for source in sources_lines_telescopes:
-    files_source = [name+'-r'+ext for name in final_names if name.startswith(source)]
+    files_source = [name+'-r-a'+ext
+                    for name in final_names if name.startswith(source)]
     if len(files_source) > 1:
         for file in files_source:
             print('- ' + file)

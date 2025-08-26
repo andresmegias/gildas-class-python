@@ -382,11 +382,11 @@ def invert_windows(windows, x):
 def plot_windows(selected_points):
     """Plot the current selected windows."""
     for x in selected_points:
-        plt.axvline(x, color='darkgray', alpha=1.)
+        plt.axvline(x, color='darkgray', alpha=1., zorder=1.5)
     windows = format_windows(selected_points)
     for (x1,x2) in windows:
         plt.axvspan(x1, x2, transform=plt.gca().transAxes,
-                    color='lightgray', alpha=1.)
+                    color='lightgray', alpha=1., zorder=1.5)
 
 def do_reduction(spectrum, selected_points, smooth_size):
     """Reduce the data."""
@@ -426,6 +426,7 @@ def plot_data(spectrum):
         plot_windows(selected_points)
     plt.axvspan(0., 0., 0., 0., facecolor='lightgray', edgecolor='darkgray',
                 label='masked windows')
+    plt.locator_params(axis='both', nbins=10)
     plt.ticklabel_format(style='sci', useOffset=False)
     plt.xlim(x_lims)
     plt.ylim(y_lims)
@@ -437,6 +438,7 @@ def plot_data(spectrum):
     plt.step(frequency, intensity_red, where='mid', color='black')
     if not args.rms_check:
         plot_windows(selected_points)
+    plt.locator_params(axis='both', nbins=10)
     plt.ticklabel_format(style='sci', useOffset=False)
     plt.xlim(x_lims)
     plt.ylim(yr_lims)
@@ -627,8 +629,10 @@ for file in args.file.split(','):
     # Interactive check of windows.
     selected_points = list(np.array(windows).flatten())
     x_lims = [frequency.min(), frequency.max()]
-    y_lims = [None, None]
-    yr_lims = [None, None]
+    y_lims = [np.quantile(intensity, 1e-3), np.quantile(intensity, 1.-1e-3)]
+    y_lims = [y_lims[0] - np.diff(y_lims)/10, y_lims[1] + np.diff(y_lims)/10]
+    yr_lims = [np.quantile(intensity_red, 5e-4), np.quantile(intensity_red, 1.-5e-4)]
+    yr_lims = [yr_lims[0] - np.diff(yr_lims)/5, yr_lims[1] + np.diff(yr_lims)/5]
     if args.check_windows:
         plt.close('all')
         plt.figure(1, figsize=(9,7))
@@ -655,6 +659,8 @@ for file in args.file.split(','):
             windows = [[float(x1),float(x2)] for (x1,x2) in windows]
             windows_dict[file] = windows
             were_windows_updated = True
+            save_yaml_dict(windows_dict, 'frequency_windows.yaml',
+                           default_flow_style=None)
             print('Updated windows for file {}.'.format(file))
     
     # Noise.
@@ -692,9 +698,10 @@ for file in args.file.split(','):
 
         if args.save_plots:
             quality = 100 if args.rms_check else 200
+            ext = 'png' if args.rms_check else 'pdf'
             os.chdir(original_folder)
             os.chdir(os.path.realpath(args.plots_folder))
-            file_name = 'spectrum-{}.png'.format(file)
+            file_name = 'spectrum-{}.{}'.format(file, ext)
             if args.rms_check:
                 file_name = file_name.replace('spectrum-rms', 'rms-spectrum')
             plt.savefig(file_name, dpi=quality)
