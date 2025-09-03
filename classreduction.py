@@ -56,8 +56,7 @@ def rolling_function(func, y, size, **kwargs):
     -------
     y_f : array
         Resultant array.
-    """
-    
+    """ 
     def rolling_window(y, window):
         """
         Group the input data according to the specified window size.
@@ -68,7 +67,6 @@ def rolling_function(func, y, size, **kwargs):
         strides = y.strides + (y.strides[-1],)
         y_w = np.lib.stride_tricks.as_strided(y, shape=shape, strides=strides)
         return y_w
-    
     size = int(size) + (int(size) + 1) % 2
     size = max(7, size)
     min_size = 1
@@ -86,7 +84,7 @@ def rolling_function(func, y, size, **kwargs):
     y_f = np.concatenate((y_1, y_c, y_2))
     return y_f
 
-def regions_args(x, windows, margin=0):
+def get_mask_from_windows(x, windows):
     """
     Select the regions of the input array specified by the given windows.
 
@@ -96,21 +94,18 @@ def regions_args(x, windows, margin=0):
         Input data.
     windows : array
         Windows that specify the regions of the data.
-    margin : float
-        Margin for the windows.
 
     Returns
     -------
-    cond : array (bool)
-        Resultant condition array.
+    mask : array (bool)
+        Resultant mask array.
     """
-    cond = np.ones(len(x), dtype=bool)
-    dx = np.median(np.diff(x))
+    mask = np.ones(len(x), dtype=bool)
     for (x1, x2) in windows:
-        cond *= (x <= x1 - dx*margin) + (x >= x2 + dx*margin)
-    return cond
+        mask *= (x < x1) + (x > x2)
+    return mask
 
-def sigma_clip_args(y, sigmas=6.0, iters=2):
+def sigma_clip_mask(y, sigmas=6.0, iters=2):
     """
     Apply a sigma clip and return a mask of the remaining data.
 
@@ -125,15 +120,15 @@ def sigma_clip_args(y, sigmas=6.0, iters=2):
 
     Returns
     -------
-    cond : array (bool)
+    mask : array (bool)
         Mask of the remaining data after applying the sigma clip.
     """
-    cond = np.ones(len(y), dtype=bool)
+    mask = np.ones(len(y), dtype=bool)
     abs_y = abs(y)
     for i in range(iters):
-        mad = median_abs_deviation(abs_y[cond], scale='normal')
-        cond *= abs_y < sigmas*mad
-    return cond
+        mad = median_abs_deviation(abs_y[mask], scale='normal')
+        mask *= abs_y < sigmas*mad
+    return mask
 
 def fit_baseline(x, y, windows, smooth_size):
     """
@@ -155,15 +150,13 @@ def fit_baseline(x, y, windows, smooth_size):
     yf : array
         Baseline of the curve.
     """
-    
-    cond = regions_args(x, windows)
-    x_ = x[cond]
-    y_ = y[cond]
+    mask = get_mask_from_windows(x, windows)
+    x_ = x[mask]
+    y_ = y[mask]
     y_s = rolling_function(np.median, y_, smooth_size)
     s = sum((y_s - y_)**2)
     spl = UnivariateSpline(x_, y_, s=s)
     yf = spl(x)
-        
     return yf
 
 def load_spectrum(file, load_fits=False):
@@ -262,16 +255,16 @@ def get_rms_noise(x, y, windows=[], sigmas=3.5, margin=0., iters=3):
     i1, i2 = int(margin*N), int((1-margin)*N)
     x = x[i1:i2]
     y = y[i1:i2]
-    cond = regions_args(x, windows)
-    y = y[cond]
-    cond = sigma_clip_args(y, sigmas=sigmas, iters=iters)
-    y = y[cond]
+    mask = get_mask_from_windows(x, windows)
+    y = y[mask]
+    mask = sigma_clip_mask(y, sigmas=sigmas, iters=iters)
+    y = y[mask]
     rms_noise = np.sqrt(np.mean(y**2)) 
     return rms_noise
 
 def find_rms_region(x, y, rms_noise, windows=[], rms_threshold=0.1,
                     offset_threshold=0.05, reference_width=200, min_width=120,
-                    max_iters=1000):
+                    max_iters=800):
     """
     Find a region of the input data that has a similar noise than the one given.
 
@@ -330,7 +323,6 @@ def find_rms_region(x, y, rms_noise, windows=[], rms_threshold=0.1,
         i += 1
         if i > max_iters:
             return []
-        
     rms_region = [float(central_freq - width/2*resolution),
                   float(central_freq + width/2*resolution)]
     return rms_region
@@ -343,40 +335,6 @@ def format_windows(selected_points):
     for (i, x1x2) in enumerate(windows):
         x1, x2 = min(x1x2), max(x1x2)
         windows[i,:] = [x1, x2]
-    return windows
-
-def get_windows(mask, x):
-    """Obtain the ranges of the input mask associated with the array x."""
-    windows = []
-    in_window = False
-    for i in range(len(x)-1):
-        if not in_window and mask[i] == True:
-            in_window = True
-            window = [x[i]]
-        elif in_window and mask[i] == False:
-            in_window = False
-            window += [(x[i-1] + x[i])/2]
-            windows += [window]
-    if in_window:
-        window += [x[-1]]
-        windows += [window]
-    elif not in_window and x[-1] == True:
-        window = [(x[-2] + x[-1])/2, x[-1]]
-        windows += [window]
-    return windows
-
-def get_mask(windows, x):
-    """Obtain a mask corresponding to the input windows on the array x"""
-    mask = np.zeros(len(x), bool)
-    for x1x2 in windows:
-        x1, x2 = min(x1x2), max(x1x2)
-        mask |= (x >= x1) & (x <= x2)
-    return mask
-
-def invert_windows(windows, x):
-    """Obtain the complementary of the input windows for the array x."""
-    mask = get_mask(windows, x)
-    windows = get_windows(~mask, x)
     return windows
 
 def plot_windows(selected_points):

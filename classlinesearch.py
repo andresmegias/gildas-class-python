@@ -58,64 +58,7 @@ def full_path(text):
     path = str(os.path.realpath(path))
     return path
 
-def get_windows(x, mask, margin=0.0, width=10.0):
-    """
-    Return the windows of the masked regions of the input array.
-
-    Parameters
-    ----------
-    x : array
-        Input data.
-    mask : array (bool)
-        Indices of the empty regions of data.
-    margin : float, optional
-        Relative margin added to the windows found initially.
-        The default is 0.0.
-    width: float, optional
-        Minimum separation in points between two consecutive windows.
-
-    Returns
-    -------
-    windows : array (float)
-        List of the inferior and superior limits of each window.
-    inds : array (int)
-        List of indices that define the filled regions if the data.
-    """
-    N = len(x)
-    separation = abs(np.diff(x))
-    reference = np.median(separation)
-    all_inds = np.arange(N)
-    var_inds = np.diff(np.concatenate(([0], np.array(mask, dtype=int), [0])))
-    cond1 = (var_inds == 1)[:-1]
-    cond2 = (var_inds == -1)[1:]
-    inds = np.append(all_inds[cond1], all_inds[cond2])
-    inds = np.sort(inds).reshape(-1,2)
-    windows = x[inds]
-    for (i, window) in enumerate(windows):
-        center = np.mean(window)
-        semiwidth = (window[1] - window[0]) / 2
-        semiwidth = max(3*reference, semiwidth, 0.1*width*reference)
-        semiwidth = (1 + margin) * semiwidth - 1E-9
-        windows[i,:] = [center - semiwidth, center + semiwidth]
-    i = 0
-    while i < len(windows) - 1:
-        difference = windows[i+1,0] - windows[i,1]
-        if difference < width*reference:
-            windows[i,0] = min(windows[i,0], windows[i+1,0])
-            windows[i,1] = max(windows[i,1], windows[i+1,1])
-            windows = np.delete(windows, i+1, axis=0)
-        else:
-            i += 1
-    if windows[0,0] <= x[0]:
-        windows = np.delete(windows, 0, axis=0)
-    if windows[-1,1] >= x[-1]:
-        windows = np.delete(windows, -1, axis=0)
-    for (i, (x1, x2)) in enumerate(windows):
-        if abs(x2 - x1) > 8.*width:
-            windows = np.delete(windows, i, axis=0)
-    return windows
-
-def regions_args(x, windows):
+def get_mask_from_windows(x, windows):
     """
     Select the regions of the input array specified by the given windows.
 
@@ -123,7 +66,7 @@ def regions_args(x, windows):
     ----------
     x : array
         Input data.
-    wins : array
+    windows : array
         Windows that specify the regions of the data.
 
     Returns
@@ -156,7 +99,6 @@ def rolling_function(func, y, size, **kwargs):
     y_f : array
         Resultant array.
     """
-    
     def rolling_window(y, window):
         """
         Group the input data according to the specified window size.
@@ -167,7 +109,6 @@ def rolling_function(func, y, size, **kwargs):
         strides = y.strides + (y.strides[-1],)
         y_w = np.lib.stride_tricks.as_strided(y, shape=shape, strides=strides)
         return y_w
-    
     min_size = 1
     size = int(size) + (int(size) + 1) % 2
     size = max(min_size, size)
@@ -185,7 +126,7 @@ def rolling_function(func, y, size, **kwargs):
     y_f = np.concatenate((y_1, y_c, y_2))
     return y_f
 
-def rolling_sigma_clip_args(x, y, smooth_size, sigmas=6.0, iters=2):
+def rolling_sigma_clip_mask(x, y, smooth_size, sigmas=6.0, iters=2):
     """
     Apply a rolling sigma clip and return a mask of the remaining data.
 
@@ -204,20 +145,20 @@ def rolling_sigma_clip_args(x, y, smooth_size, sigmas=6.0, iters=2):
 
     Returns
     -------
-    cond : array (bool)
+    mask : array (bool)
         Mask of the remaining data after applying the sigma clip.
     """
-    cond = np.ones(len(y), dtype=bool)
+    mask = np.ones(len(y), dtype=bool)
     abs_y = abs(y)
     for i in range(iters):
-        rolling_mad = rolling_function(median_abs_deviation, abs_y[cond],
+        rolling_mad = rolling_function(median_abs_deviation, abs_y[mask],
                                        size=smooth_size, scale='normal')
-        rolling_mad = np.interp(x, x[cond], rolling_mad)
+        rolling_mad = np.interp(x, x[mask], rolling_mad)
 
-        cond *= np.less(abs_y, sigmas*rolling_mad)
-    return cond
+        mask *= np.less(abs_y, sigmas*rolling_mad)
+    return mask
 
-def sigma_clip_args(y, sigmas=6.0, iters=2):
+def sigma_clip_mask(y, sigmas=6.0, iters=2):
     """
     Apply a sigma clip and return a mask of the remaining data.
 
@@ -232,15 +173,65 @@ def sigma_clip_args(y, sigmas=6.0, iters=2):
 
     Returns
     -------
-    cond : array (bool)
+    mask : array (bool)
         Mask of the remaining data after applying the sigma clip.
     """
-    cond = np.ones(len(y), dtype=bool)
+    mask = np.ones(len(y), dtype=bool)
     abs_y = abs(y)
     for i in range(iters):
-        mad = median_abs_deviation(abs_y[cond], scale='normal')
-        cond *= abs_y < sigmas*mad
-    return cond
+        mad = median_abs_deviation(abs_y[mask], scale='normal')
+        mask *= abs_y < sigmas*mad
+    return mask
+
+def get_windows_from_mask(x, mask, margin=1., ref_width=8.):
+    """
+    Return the windows of the masked regions of the input array.
+
+    Parameters
+    ----------
+    x : array
+        Input data.
+    mask : array (bool)
+        Indices of the empty regions of data.
+    margin : float, optional
+        Relative margin added to the windows found initially.
+        The default is 0.0.
+    ref_width: float, optional
+        Reference width of the windows.
+
+    Returns
+    -------
+    windows : array (float)
+        List of the inferior and superior limits of each window.
+    inds : array (int)
+        List of indices that define the filled regions if the data.
+    """
+    resolution = np.median(abs(np.diff(x)))
+    all_inds = np.arange(len(x))
+    diff_inds = np.diff(np.concatenate(([0], np.array(mask, dtype=int), [0])))
+    cond1 = (diff_inds == 1)[:-1]  # from 0 to 1 
+    cond2 = (diff_inds == -1)[1:]  # from 1 to 0 
+    inds = np.append(all_inds[cond1], all_inds[cond2])
+    inds = np.sort(inds).reshape(-1,2)
+    windows = x[inds]
+    for (i, window) in enumerate(windows):
+        center = (window[0] + window[1]) / 2
+        semiwidth = (window[1] - window[0]) / 2
+        semiwidth = max(semiwidth, ref_width/4)
+        semiwidth += margin*resolution
+        windows[i,:] = [center - semiwidth, center + semiwidth]
+    i = 0
+    while i < len(windows):
+        x1, x2 = windows[i]
+        if (x2 - x1) > 6.*ref_width*resolution:
+            windows = np.delete(windows, i, axis=0)
+        else:
+            i += 1
+    if windows[0,0] <= x[0]:
+        windows = np.delete(windows, 0, axis=0)
+    if windows[-1,1] >= x[-1]:
+        windows = np.delete(windows, -1, axis=0)
+    return windows
 
 def fit_baseline(x, y, windows, smooth_size):
     """
@@ -262,15 +253,13 @@ def fit_baseline(x, y, windows, smooth_size):
     y3 : array
         Baseline of the curve.
     """
-    
-    cond = regions_args(x, windows)
-    x_ = x[cond]
-    y_ = y[cond]
+    mask = get_mask_from_windows(x, windows)
+    x_ = x[mask]
+    y_ = y[mask]
     y_s = rolling_function(np.median, y_, smooth_size)
     s = sum((y_s - y_)**2)
     spl = UnivariateSpline(x_, y_, s=s)
     yf = spl(x)
-        
     return yf
 
 def identify_lines(x, y, smooth_size, line_width, sigmas, iters=2,
@@ -297,26 +286,19 @@ def identify_lines(x, y, smooth_size, line_width, sigmas, iters=2,
 
     Returns
     -------
-    y3 : array
-        Estimated baseline.
     windows: array
         Values of the windows of the identified lines.
     """
-
-    y2 = rolling_function(np.median, y, smooth_size)  
-    
+    y_ = rolling_function(np.median, y, smooth_size)  
     for i in range(iters):
- 
         if rolling_sigma_clip:
-            cond = rolling_sigma_clip_args(x, y-y2, 2*smooth_size, sigmas, iters=2)
+            mask = rolling_sigma_clip_mask(x, y-y_, 2*smooth_size, sigmas,
+                                           iters=2)
         else:
-            cond = sigma_clip_args(y-y2, sigmas=sigmas, iters=2)
-        windows = get_windows(x, ~cond, margin=1.5, width=line_width)
-        
+            mask = sigma_clip_mask(y-y_, sigmas=sigmas, iters=2)
+        windows = get_windows_from_mask(x, ~mask, margin=1.5, ref_width=line_width)
         if i+1 < iters:
-            y3 = fit_baseline(x, y, windows, smooth_size)  
-            y2 = y3
-        
+            y_ = fit_baseline(x, y, windows, smooth_size)  
     return windows
 
 def load_spectrum(file, load_fits=False):
@@ -479,9 +461,9 @@ for file in args.file.split(','):
                 j += 15*i
                 x1, x2 = windows[j]
                 margin = max(args.width*dx, 0.4*(x2-x1))
-                cond = (frequency > x1 - margin) * (frequency < x2 + margin)
-                xj = frequency[cond]
-                yrj = intensity_red[cond]
+                mask = (frequency > x1 - margin) * (frequency < x2 + margin)
+                xj = frequency[mask]
+                yrj = intensity_red[mask]
                 plt.step(xj, yrj, where='mid', color='black')
                 plt.axvspan(x1, x2, color='gray', alpha=0.2)
                 plt.margins(x=0, y=0.1)
