@@ -4,7 +4,7 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Merging mode
-Version 1.3
+Version 1.4
 
 Copyright (C) 2025 - Andrés Megías Toledano
 

@@ -3,9 +3,9 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Reduction mode
-Version 1.3
+Version 1.4
 
-Copyright (C) 2024 - Andrés Megías Toledano
+Copyright (C) 2025 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -66,16 +66,6 @@ function safe_realpath(path)
 function madn(x::Array{Float64})
     """
     Return the normalized median absolute deviation (MAD) of the input data.
-
-    Parameters
-    ----------
-    x : Vector
-        Input data.
-
-    Returns
-    -------
-    y : Float
-        Normalized median absolute deviation.
     """
     y = mad(x, normalize=true)
     return y
@@ -119,8 +109,8 @@ function rolling_function(func::Function, y::Vector{Float64}, roll_size::Int)
     return y_f
 end
 
-function get_windows(x::Vector{Float64}, cond::Vector{Bool};
-                        margin::Float64=0.0, width::Float64=10.0)
+function get_windows_from_mask(x::Vector{Float64}, mask::Vector{Bool};
+                               margin::Float64=1.0, ref_width::Float64=8.0)
     """
     Return the windows of the empty regions of the input array.
 
@@ -128,85 +118,79 @@ function get_windows(x::Vector{Float64}, cond::Vector{Bool};
     ----------
     x : Vector
         Input data.
-    cond : Vector
+    mask : Vector
         Indices of the empty regions of data.
     margin : Float, optional
         Relative margin added to the windows found initially.
-        The default is 0.0.
-    width: Float, optional
-        Minimum separation in points between two consecutive windows.
+    ref_width: Float, optional
+        Reference separation in points between two consecutive windows.
 
     Returns
     -------
-    windows : Array{Float}
+    windows : Vector
         List of the inferior and superior limits of each window.
-    inds : Array{Int}
-        List of indices that define the filled regions if the data.
     """
-
-    N = length(x)
-    separation = abs.(diff(x))
-    reference = stats.median(separation)
-    all_inds = 1:N
-
-    var_inds = diff(vcat([0], Int.(cond), [0]))
-    cond1 = (var_inds .== 1)[1:end-1]
-    cond2 = (var_inds .== -1)[2:end]
+    resolution = stats.median(abs.(diff(x)))
+    all_inds = 1:length(x)
+    var_inds = diff(vcat([0], Int.(mask), [0]))
+    cond1 = (var_inds .== 1)[1:end-1]  # from 0 to 1
+    cond2 = (var_inds .== -1)[2:end]  # from 1 to 0
     inds = vcat(all_inds[cond1], all_inds[cond2])
     inds = reshape(sort(inds), (2,length(inds)÷2))'
-
     windows = x[inds]
     for i in 1:size(windows)[1]
         window = windows[i,:]
         center = stats.mean(window)
         semiwidth = (window[2] - window[1]) / 2
-        semiwidth = max(3*reference, semiwidth, 0.1*width*reference)
-        semiwidth = (1 + margin) * semiwidth - 1E-9
+        semiwidth = max(semiwidth, ref_width/4)
+        semiwidth += margin
         windows[i,:] = [center - semiwidth, center + semiwidth]
-        windows[i,1] = max(x[1], windows[i,1])
-        windows[i,2] = min(windows[i,2], x[end])
     end
     i = 1
-    while i < size(windows)[1]
-        difference = windows[i+1,1] - windows[i,2]
-        if difference < width*reference
-            windows[i,1] = min(windows[i,1], windows[i+1,1])
-            windows[i,2] = max(windows[i,2], windows[i+1,2])
-            windows = windows[1:end .!= i+1, :]
+    while i <= size(windows)[1]
+        x1, x2 = windows[i,:]
+        if (x2 - x1) > 6.0*ref_width*resolution
+            windows = windows[1:end .!= i, :]
         else
             i += 1
         end
     end
+    if windows[1,1] <= x[1]
+        windows = windows[1:end .!= 1, :]
+    end
+    if windows[end,2] >= x[end]
+        windows = windows[1:end .!= length(windows), :]
+    end
     return windows
 end
 
-function regions_args(x::Vector{Float64}, windows::Matrix{Float64};
-                      margin::Float64=0.0)
+function get_mask_from_windows(x::Vector{Float64}, windows::Matrix{Float64};
+                               margin::Float64=0.0)
     """
-    Select the regions of the input array specified by the given windows.
+    Obtain the mask of the input array defined by the given windows.
 
     Parameters
     ----------
     x : Vector
         Input data.
-    wins : Matrix
+    windows : Matrix
         Windows that specify the regions of the data.
 
     Returns
     -------
-    cond : Array{Bool}
+    mask : Vector
         Resultant condition array.
     """
-    cond = ones(Bool, length(x))
+    mask = ones(Bool, length(x))
     dx = stats.median(diff(x))
     for i in 1:size(windows)[1]
         x1, x2 = windows[i,1], windows[i,2]
-        cond .*= ((x .<= x1 - dx*margin) .+ (x .>= x2 + dx*margin))
+        mask .*= ((x .<= x1 - dx*margin) .+ (x .>= x2 + dx*margin))
     end
-    return cond
+    return mask
 end
 
-function sigma_clip_args(y::Vector{Float64}; sigmas::Float64=6.0, iters::Int=2)
+function sigma_clip_mask(y::Vector{Float64}; sigmas::Float64=6.0, iters::Int=2)
     """
     Apply a sigma clip and return a mask of the remaining data.
 
@@ -215,55 +199,21 @@ function sigma_clip_args(y::Vector{Float64}; sigmas::Float64=6.0, iters::Int=2)
     y : Vector
         Input data.
     sigmas : Float, optional
-        Number of standard deviations used as threshold. The default is 4.0.
+        Number of standard deviations used as threshold. The default is 6.0.
     iters : Int, optional
-        Number of iterations performed. The default is 3.
+        Number of iterations performed. The default is 2.
 
     Returns
     -------
-    cond : Array{Bool}
+    mask : Vector
         Mask of the remaining data after applying the sigma clip.
     """
-    cond = ones(Bool, length(y))
+    mask = ones(Bool, length(y))
     abs_y = abs.(y)
     for i in 1:iters
-        cond .*= abs_y .< sigmas*madn(abs_y[cond])
+        mask .*= abs_y .< sigmas*madn(abs_y[mask])
     end
-    return cond
-end
-
-function rolling_sigma_clip_args(x::Vector{Float64}, y::Vector{Float64};
-                                 smooth::Int, sigmas::Float64=6.0, iters::Int=2)
-    """
-    Apply a rolling sigma clip and return a mask of the remaining data.
-
-    Parameters
-    ----------
-    x : Vector
-        Dependent variable.
-    y : Vector
-        Independent variable.
-    size : Int
-        Size of the windows to group the data. It must be odd.
-    sigmas : Float, optional
-        Number of standard deviations used as threshold. The default is 4.0.
-    iters : Int, optional
-        Number of iterations performed. The default is 3.
-
-    Returns
-    -------
-    cond : Array{Bool}
-        Mask of the remaining data after applying the sigma clip.
-    """
-    cond = ones(Bool, length(y))
-    abs_y = abs.(y)
-    for i in 1:iters
-        rolling_mad = rolling_function(madn, abs_y[cond], 2*smooth)
-        itp = LinearInterpolation(x[cond], rolling_mad, extrapolation_bc=Line())
-        rolling_mad = itp(x)
-        cond .*= abs_y .< sigmas.*rolling_mad
-    end
-    return cond
+    return mask
 end
 
 function fit_baseline(x::Vector{Float64}, y::Vector{Float64};
@@ -284,100 +234,17 @@ function fit_baseline(x::Vector{Float64}, y::Vector{Float64};
 
     Returns
     -------
-    yf : Array
+    yf : Vector
         Baseline of the curve.
     """
-    cond = regions_args(x, windows)
-    x_ = x[cond]
-    y_ = y[cond]
+    mask = get_mask_from_windows(x, windows)
+    x_ = x[mask]
+    y_ = y[mask]
     y_s = rolling_function(stats.median, y_, smooth_size)
     s = sum((y_s - y_).^2)
     spl = scipy_interpolate.UnivariateSpline(x_, y_, s=s)
     yf = spl(x)
     return yf
-end
-
-function identify_lines(x::Vector{Float64}, y::Vector{Float64}; smooth_size::Int,
-    line_width::Float64, sigmas::Float64, iters::Int=2,
-    rolling_sigma_clip::Bool=false)
-    """
-    Identify the lines of the spectrum and fits the baseline.
-
-    Parameters
-    ----------
-    x : Vector
-        Frequency.
-    y : Vector
-        Intensity.
-    smooth_size : Int
-        Size of the filter applied for the fitting of the baseline.
-    line_width : Float
-        Reference line width for merging close windows.
-    sigmas : Float
-        Threshold for identifying the outliers.
-    iters : Int, optional
-        Number of iterations of the process. The default is 2.
-    rolling_sigma_clip: Bool, optional
-        Use a rolling sigma clip for finding the outliers.
-
-    Returns
-    -------
-    y3 : Vector
-        Estimated baseline.
-    windows: Array
-        Values of the windows of the identified lines.
-    """
-
-    local y2 = rolling_function(stats.median, y, smooth_size)
-
-    local windows
-
-    for i in 1:iters
-
-        cond = []
-        if rolling_sigma_clip
-            cond = rolling_sigma_clip_args(x, y.-y2, smooth=smooth_size,
-                                            sigmas=sigmas)
-        else
-            cond = sigma_clip_args(y.-y2, sigmas=sigmas)
-        end
-        _cond = Vector(.!cond)
-
-        windows = get_windows(x, _cond, margin=1.5, width=line_width)
-
-        if i < iters
-            y2 = fit_baseline(x, y, windows=windows, smooth_size=smooth_size)
-        end
-
-    end
-
-    return windows
-end
-
-function sigma_clip_args(y::Vector{Float64}; sigmas::Float64=6.0, iters::Int=2)
-    """
-    Apply a sigma clip and return a mask of the remaining data.
-
-    Parameters
-    ----------
-    y : Vector
-        Input data.
-    sigmas : Float, optional
-        Number of standard deviations used as threshold. The default is 6.0.
-    iters : Int, optional
-        Number of iterations performed. The default is 3.
-
-    Returns
-    -------
-    cond : Array{Bool}
-        Mask of the remaining data after applying the sigma clip.
-    """
-    cond = ones(Bool, length(y))
-    abs_y = abs.(y)
-    for i in 1:iters
-        cond .*= abs_y .< sigmas*madn(abs_y[cond])
-    end
-    return cond
 end
 
 function load_spectrum(file::String; load_fits::Bool=false)
@@ -480,10 +347,10 @@ function get_rms_noise(x::Vector{Float64}, y::Vector{Float64},
     i1, i2 = Int(round(margin*N)), Int(round((1-margin)*N))+1
     x = x[i1:i2]
     y = y[i1:i2]
-    cond = regions_args(x, windows)
-    y = y[cond]
-    cond = sigma_clip_args(y, sigmas=sigmas, iters=iters)
-    y = y[cond]
+    mask = get_mask_from_windows(x, windows)
+    y = y[mask]
+    mask = sigma_clip_mask(y, sigmas=sigmas, iters=iters)
+    y = y[mask]
     rms_noise = √(stats.mean(y.^2))
     return rms_noise
 end
@@ -539,8 +406,8 @@ function find_rms_region(x::Array{Float64}, y::Array{Float64}; rms_noise::Float6
                                                 x[end] - width*resolution))
         region_inf = central_freq - width/2*resolution
         region_sup = central_freq + width/2*resolution
-        cond = (x .> region_inf) .* (x .< region_sup)
-        y_ = y[cond]
+        mask = (x .> region_inf) .* (x .< region_sup)
+        y_ = y[mask]
         valid_range = true
         for j in 1:size(windows)[1]
             x1, x2 = windows[j,:]
@@ -557,10 +424,8 @@ function find_rms_region(x::Array{Float64}, y::Array{Float64}; rms_noise::Float6
             return []
         end
     end
-
     rms_region = [central_freq - width/2*resolution,
                   central_freq + width/2*resolution]
-
     return rms_region
 end
 

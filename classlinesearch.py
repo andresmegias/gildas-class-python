@@ -4,9 +4,9 @@
 Automated GILDAS-CLASS Pipeline
 -------------------------------
 Line search mode
-Version 1.3
+Version 1.4
 
-Copyright (C) 2024 - Andrés Megías Toledano
+Copyright (C) 2025 - Andrés Megías Toledano
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -227,9 +227,9 @@ def get_windows_from_mask(x, mask, margin=1., ref_width=8.):
             windows = np.delete(windows, i, axis=0)
         else:
             i += 1
-    if windows[0,0] <= x[0]:
+    if windows[0,0] <= x.min():
         windows = np.delete(windows, 0, axis=0)
-    if windows[-1,1] >= x[-1]:
+    if windows[-1,1] >= x.max():
         windows = np.delete(windows, -1, axis=0)
     return windows
 
