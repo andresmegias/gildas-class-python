@@ -248,7 +248,6 @@ default_options = {
     'reduction': {
         'check windows': True,
         'save plots': False,
-        'rolling sigma clip': False,
         'reference width': 14,
         'smoothing factor': 20,
         'intensity threshold (rms)': 8.,
@@ -339,10 +338,9 @@ elif 'averaging' in options:
     options['averaging']['ghost lines'] = default_options['ghost lines']
 check_windows = options['reduction']['check windows']
 save_plots = options['reduction']['save plots']
-line_width = str(options['reduction']['reference width'])
+ref_width = str(options['reduction']['reference width'])
 smooth_factor = str(options['reduction']['smoothing factor'])
 intensity_threshold = str(options['reduction']['intensity threshold (rms)'])
-rolling_sigma_clip = str(options['reduction']['rolling sigma clip'])
 rms_margin = str(options['reduction']['relative frequency margin for rms noise'])
 if 'rms noise check' in options:
     for rms_opt_list in options['rms noise check']:
@@ -1272,7 +1270,7 @@ if args.line_search:
     if args.use_julia:
         arguments = ['classlinesearch.jl', files_folder, ','.join(all_spectra),
                      '--plots_folder', config_folder + plots_folder,
-                     '--width', line_width, '--smooth', smooth_factor,
+                     '--ref_width', ref_width, '--smooth_size', smooth_factor,
                      '--threshold', intensity_threshold]
         if local_run:
             os.chdir(original_folder)
@@ -1281,7 +1279,7 @@ if args.line_search:
     else:
         arguments = ['classlinesearch.py', files_folder, ','.join(all_spectra),
                      '-plots_folder', config_folder + plots_folder,
-                     '-width', line_width, '-smooth', smooth_factor,
+                     '-ref_width', ref_width, '-smooth_size', smooth_factor,
                      '-threshold', intensity_threshold]
         if local_run:
             os.chdir(original_folder)
@@ -1291,8 +1289,6 @@ if args.line_search:
                 arguments[0] = 'py'
     if save_plots:
         arguments += ['--save_plots']
-    if rolling_sigma_clip:
-        arguments += ['--rolling_sigma']
         
     subprocess.run(arguments)
 

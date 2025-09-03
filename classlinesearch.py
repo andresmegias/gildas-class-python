@@ -126,38 +126,6 @@ def rolling_function(func, y, size, **kwargs):
     y_f = np.concatenate((y_1, y_c, y_2))
     return y_f
 
-def rolling_sigma_clip_mask(x, y, smooth_size, sigmas=6.0, iters=2):
-    """
-    Apply a rolling sigma clip and return a mask of the remaining data.
-
-    Parameters
-    ----------
-    x : array
-        Dependent variable.
-    y : array
-        Independent variable.
-    size : int
-        Size of the windows to group the data. It must be odd.
-    sigmas : float, optional
-        Number of standard deviations used as threshold. The default is 6.0.
-    iters : int, optional
-        Number of iterations performed. The default is 3.
-
-    Returns
-    -------
-    mask : array (bool)
-        Mask of the remaining data after applying the sigma clip.
-    """
-    mask = np.ones(len(y), dtype=bool)
-    abs_y = abs(y)
-    for i in range(iters):
-        rolling_mad = rolling_function(median_abs_deviation, abs_y[mask],
-                                       size=smooth_size, scale='normal')
-        rolling_mad = np.interp(x, x[mask], rolling_mad)
-
-        mask *= np.less(abs_y, sigmas*rolling_mad)
-    return mask
-
 def sigma_clip_mask(y, sigmas=6.0, iters=2):
     """
     Apply a sigma clip and return a mask of the remaining data.
@@ -214,22 +182,29 @@ def get_windows_from_mask(x, mask, margin=1., ref_width=8.):
     inds = np.append(all_inds[cond1], all_inds[cond2])
     inds = np.sort(inds).reshape(-1,2)
     windows = x[inds]
-    for (i, window) in enumerate(windows):
-        center = (window[0] + window[1]) / 2
-        semiwidth = (window[1] - window[0]) / 2
-        semiwidth = max(semiwidth, ref_width/4)
-        semiwidth += margin*resolution
-        windows[i,:] = [center - semiwidth, center + semiwidth]
+    i = 0
+    while i+1 < len(windows):
+        diff = windows[i+1,0] - windows[i,1]
+        if diff <= ref_width / 6.:
+            windows[i,1] = windows[i+1,1]
+            windows = np.delete(windows, i+1, axis=0)
+        else:
+            i += 1
     i = 0
     while i < len(windows):
         x1, x2 = windows[i]
-        if (x2 - x1) > 6.*ref_width*resolution:
+        if (x2 - x1) > 8.*ref_width*resolution:
             windows = np.delete(windows, i, axis=0)
         else:
             i += 1
-    if windows[0,0] <= x.min():
+    for (i, window) in enumerate(windows):
+        center = (window[0] + window[1]) / 2
+        semiwidth = (window[1] - window[0]) / 2
+        semiwidth += max(margin, ref_width/6.) * resolution
+        windows[i,:] = [center - semiwidth, center + semiwidth]
+    if len(windows) > 0 and windows[0,0] <= x.min():
         windows = np.delete(windows, 0, axis=0)
-    if windows[-1,1] >= x.max():
+    if len(windows) > 0 and windows[-1,1] >= x.max():
         windows = np.delete(windows, -1, axis=0)
     return windows
 
@@ -262,8 +237,7 @@ def fit_baseline(x, y, windows, smooth_size):
     yf = spl(x)
     return yf
 
-def identify_lines(x, y, smooth_size, line_width, sigmas, iters=2,
-                   rolling_sigma_clip=False):
+def identify_lines(x, y, smooth_size, ref_width, sigmas, iters=2):
     """
     Identify the lines of the spectrum and fit the baseline.
 
@@ -281,8 +255,6 @@ def identify_lines(x, y, smooth_size, line_width, sigmas, iters=2,
         Threshold for identifying the outliers.
     iters : int, optional
         Number of iterations of the process. The default is 2.
-    rolling_sigma_clip: bool, optional
-        Use a rolling sigma clip for finding the outliers.
 
     Returns
     -------
@@ -291,12 +263,8 @@ def identify_lines(x, y, smooth_size, line_width, sigmas, iters=2,
     """
     y_ = rolling_function(np.median, y, smooth_size)  
     for i in range(iters):
-        if rolling_sigma_clip:
-            mask = rolling_sigma_clip_mask(x, y-y_, 2*smooth_size, sigmas,
-                                           iters=2)
-        else:
-            mask = sigma_clip_mask(y-y_, sigmas=sigmas, iters=2)
-        windows = get_windows_from_mask(x, ~mask, margin=1.5, ref_width=line_width)
+        mask = sigma_clip_mask(y-y_, sigmas=sigmas, iters=2)
+        windows = get_windows_from_mask(x, ~mask, margin=1.5, ref_width=ref_width)
         if i+1 < iters:
             y_ = fit_baseline(x, y, windows, smooth_size)  
     return windows
@@ -368,11 +336,10 @@ def save_yaml_dict(dictionary, file_path, default_flow_style=False, replace=Fals
 parser = argparse.ArgumentParser()
 parser.add_argument('folder', default='./')
 parser.add_argument('file', default='spectrum.dat')
-parser.add_argument('-smooth', default=20, type=int)
-parser.add_argument('-width', default=6, type=int)
+parser.add_argument('-smooth_size', default=20, type=int)
+parser.add_argument('-ref_width', default=6, type=int)
 parser.add_argument('-threshold', default=6., type=float)
 parser.add_argument('-plots_folder', default='plots', type=str)
-parser.add_argument('--rolling_sigma', action='store_true')
 parser.add_argument('--save_plots', action='store_true')
 parser.add_argument('--check_windows', action='store_true')
 args = parser.parse_args()
@@ -391,18 +358,16 @@ for file in args.file.split(','):
     frequency, intensity, _ = load_spectrum(file)
 
     # Identification of the lines and reduction of the spectrum.
-    windows = identify_lines(frequency, intensity, smooth_size=args.smooth,
-                       line_width=args.width, sigmas=args.threshold, iters=2,
-                       rolling_sigma_clip=args.rolling_sigma)
-    intensity_cont = fit_baseline(frequency, intensity, windows, args.smooth)
+    windows = identify_lines(frequency, intensity, smooth_size=args.smooth_size,
+                       ref_width=args.ref_width, sigmas=args.threshold, iters=2)
+    intensity_cont = fit_baseline(frequency, intensity, windows, args.smooth_size)
     intensity_red = intensity - intensity_cont
     
     # Windows.
     if len(windows) != 0:
-        print('{} windows identified for {}.'
-              .format(str(len(windows)), file))
+        print('{} windows identified for {}.'.format(str(len(windows)), file))
     else:
-        windows = np.array([[frequency[0], frequency[1]/2]])
+        windows = np.array([])
         print('No lines identified for {}.'.format(file))
     windows_dict[file] = [[x1, x2] for x1, x2 in windows.tolist()]
     
@@ -448,6 +413,8 @@ for file in args.file.split(','):
 
         fig.align_ylabels()
         plt.tight_layout(pad=0.7, h_pad=1.0)
+        # plt.show()
+        # input('stop')
 
         dx = np.median(np.diff(frequency)) 
         plt.rcParams['font.size'] = 8
@@ -460,7 +427,7 @@ for file in args.file.split(','):
                 plt.subplot(3, 5, j+1)
                 j += 15*i
                 x1, x2 = windows[j]
-                margin = max(args.width*dx, 0.4*(x2-x1))
+                margin = max(args.ref_width*dx, 0.4*(x2-x1))
                 mask = (frequency > x1 - margin) * (frequency < x2 + margin)
                 xj = frequency[mask]
                 yrj = intensity_red[mask]

@@ -551,11 +551,11 @@ if args.check_windows:
 if not args.rms_check:
     if os.path.isfile('frequency_windows.yaml'):
         with open('frequency_windows.yaml') as file:
-            windows_dict = yaml.safe_load(file)
+            all_windows = yaml.safe_load(file)
     else:
-        print('\nWarning: The file frequency_windows.yaml is missing. '
+        print('Warning: The file frequency_windows.yaml is missing. '
               + 'No frequency windows will be used.\n')
-        windows_dict = []
+        all_windows = {}
 were_windows_updated = False
         
 rms_noises = {}
@@ -573,10 +573,10 @@ for file in args.file.split(','):
     resolutions[file] = hdul[0].header['cdelt1'] / 1e6
     reference_frequencies[file] = hdul[0].header['restfreq'] / 1e6
     # Reduction.
-    if not args.rms_check:
-        windows = windows_dict[file]
+    if args.rms_check or len(all_windows) == 0:
+        windows = []
     else:
-        windows = [[frequency[0], frequency[1]/10]]
+        windows = all_windows[file] if file in all_windows else []
     if args.smooth > len(frequency):
         args.smooth = len(frequency)
     intensity_cont = fit_baseline(frequency, intensity, windows, args.smooth)
@@ -615,9 +615,9 @@ for file in args.file.split(','):
         windows = format_windows(selected_points)
         if not np.array_equal(windows, windows_copy):
             windows = [[float(x1),float(x2)] for (x1,x2) in windows]
-            windows_dict[file] = windows
+            all_windows[file] = windows
             were_windows_updated = True
-            save_yaml_dict(windows_dict, 'frequency_windows.yaml',
+            save_yaml_dict(all_windows, 'frequency_windows.yaml',
                            default_flow_style=None)
             print('Updated windows for file {}.'.format(file))
     
@@ -696,7 +696,7 @@ print('Saved frequency resolutions in {}frequency_resolutions.yaml.'
 
 # Export of the frequency windows of each spectrum.
 if args.check_windows and were_windows_updated:
-    save_yaml_dict(windows_dict, 'frequency_windows.yaml', default_flow_style=None)
+    save_yaml_dict(all_windows, 'frequency_windows.yaml', default_flow_style=None)
     print('Saved windows in {}frequency_windows.yaml.'.format(args.folder))
 
 print()

@@ -474,10 +474,13 @@ for file in split(args["file"], ",")
     reference_frequencies[file] = fits_header["RESTFREQ"] / 1e6
     frequency_ranges[file] = [frequency[1], frequency[end]]
     # Reduction.
-    windows = all_windows[file]
+    if file in all_windows
+        windows = all_windows[file]
+    else:
+        windows = []
     windows = Matrix(hcat(windows...)')
     intensity_cont = fit_baseline(frequency, intensity, windows=windows,
-                                    smooth_size=args["smooth"])
+                                  smooth_size=args["smooth"])
     intensity_red = intensity .- intensity_cont
     # Noise.
     rms_noise = get_rms_noise(frequency, intensity_red, windows,

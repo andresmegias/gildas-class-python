@@ -137,27 +137,36 @@ function get_windows_from_mask(x::Vector{Float64}, mask::Vector{Bool};
     inds = vcat(all_inds[cond1], all_inds[cond2])
     inds = reshape(sort(inds), (2,length(inds)÷2))'
     windows = x[inds]
-    for i in 1:size(windows)[1]
-        window = windows[i,:]
-        center = (window[1] + window[2]) / 2
-        semiwidth = (window[2] - window[1]) / 2
-        semiwidth = max(semiwidth, ref_width/4)
-        semiwidth += margin*resolution
-        windows[i,:] = [center - semiwidth, center + semiwidth]
+    i = 1
+    while i+1 <= size(windows)[1]
+        diff = windows[i+1,1] - windows[i,2]
+        if diff <= ref_width / 6
+            windows[i,2] = windows[i+1,2]
+            windows = windows[1:end .!= i+1, :]
+        else
+            i += 1
+        end
     end
     i = 1
     while i <= size(windows)[1]
         x1, x2 = windows[i,:]
-        if (x2 - x1) > 6.0*ref_width*resolution
+        if (x2 - x1) > 8*ref_width*resolution
             windows = windows[1:end .!= i, :]
         else
             i += 1
         end
     end
-    if windows[1,1] <= minimum(x)
+    for i in 1:size(windows)[1]
+        window = windows[i,:]
+        center = (window[1] + window[2]) / 2
+        semiwidth = (window[2] - window[1]) / 2
+        semiwidth += max(margin, ref_width/6) * resolution
+        windows[i,:] = [center - semiwidth, center + semiwidth]
+    end
+    if (size(windows)[1] > 0) & (windows[1,1] <= minimum(x))
         windows = windows[1:end .!= 1, :]
     end
-    if windows[end,2] >= maximum(x)
+    if (size(windows)[1] > 0) & (windows[end,2] >= maximum(x))
         windows = windows[1:end .!= size(windows)[1], :]
     end
     return windows
@@ -210,41 +219,7 @@ function sigma_clip_mask(y::Vector{Float64}; sigmas::Float64=6.0, iters::Int=2)
     mask = ones(Bool, length(y))
     abs_y = abs.(y)
     for i in 1:iters
-        mask .*= abs_y .< sigmas*madn(abs_y[cond])
-    end
-    return mask
-end
-
-function rolling_sigma_clip_mask(x::Vector{Float64}, y::Vector{Float64};
-                                 smooth::Int, sigmas::Float64=6.0, iters::Int=2)
-    """
-    Apply a rolling sigma clip and return a mask of the remaining data.
-
-    Parameters
-    ----------
-    x : Vector
-        Dependent variable.
-    y : Vector
-        Independent variable.
-    size : Int
-        Size of the windows to group the data. It must be odd.
-    sigmas : Float, optional
-        Number of standard deviations used as threshold. The default is 4.0.
-    iters : Int, optional
-        Number of iterations performed. The default is 3.
-
-    Returns
-    -------
-    mask : Vector
-        Mask of the remaining data after applying the sigma clip.
-    """
-    mask = ones(Bool, length(y))
-    abs_y = abs.(y)
-    for i in 1:iters
-        rolling_mad = rolling_function(madn, abs_y[mask], 2*smooth)
-        itp = LinearInterpolation(x[mask], rolling_mad, extrapolation_bc=Line())
-        rolling_mad = itp(x)
-        mask .*= abs_y .< sigmas.*rolling_mad
+        mask .*= abs_y .< sigmas*madn(abs_y[mask])
     end
     return mask
 end
@@ -281,8 +256,7 @@ function fit_baseline(x::Vector{Float64}, y::Vector{Float64};
 end
 
 function identify_lines(x::Vector{Float64}, y::Vector{Float64}; smooth_size::Int,
-    line_width::Float64, sigmas::Float64, iters::Int=2,
-    rolling_sigma_clip::Bool=false)
+    line_width::Float64, sigmas::Float64, iters::Int=2)
     """
     Identify the lines of the spectrum and fits the baseline.
 
@@ -300,8 +274,6 @@ function identify_lines(x::Vector{Float64}, y::Vector{Float64}; smooth_size::Int
         Threshold for identifying the outliers.
     iters : Int, optional
         Number of iterations of the process. The default is 2.
-    rolling_sigma_clip: Bool, optional
-        Use a rolling sigma clip for finding the outliers.
 
     Returns
     -------
@@ -311,13 +283,7 @@ function identify_lines(x::Vector{Float64}, y::Vector{Float64}; smooth_size::Int
     local y_ = rolling_function(stats.median, y, smooth_size)
     local windows
     for i in 1:iters
-        mask = []
-        if rolling_sigma_clip
-            mask = rolling_sigma_clip_mask(x, y.-y_, smooth=smooth_size,
-                                            sigmas=sigmas)
-        else
-            mask = sigma_clip_mask(y.-y_, sigmas=sigmas)
-        end
+        mask = sigma_clip_mask(y.-y_, sigmas=sigmas)
         _mask = Vector(.!mask)
         windows = get_windows_from_mask(x, _mask, margin=1.5, ref_width=line_width)
         if i < iters
@@ -403,10 +369,10 @@ argparse.@add_arg_table! aps begin
     "file"
     arg_type = String
     required = true
-    "--smooth"
+    "--smooth_size"
     arg_type = Int
     default = 20
-    "--width"
+    "--ref_width"
     arg_type = Float64
     default = 6.0
     "--threshold"
@@ -415,8 +381,6 @@ argparse.@add_arg_table! aps begin
     "--plots_folder"
     arg_type = String
     default = "plots"
-    "--rolling_sigma"
-    action = :store_true
     "--save_plots"
     action = :store_true
 end
@@ -439,11 +403,11 @@ for file in split(args["file"], ",")
 
     # Identification of the lines and reduction of the spectrum.
     windows =
-        identify_lines(frequency, intensity, smooth_size=args["smooth"],
-                       line_width=args["width"], sigmas=args["threshold"],
-                       iters=2, rolling_sigma_clip=args["rolling_sigma"])
+        identify_lines(frequency, intensity, smooth_size=args["smooth_size"],
+                       line_width=args["ref_width"], sigmas=args["threshold"],
+                       iters=2)
     intensity_cont = fit_baseline(frequency, intensity, windows=windows,
-                                  smooth_size=args["smooth"])
+                                  smooth_size=args["smooth_size"])
     intensity_red = intensity .- intensity_cont
 
     # Windows.
@@ -453,7 +417,7 @@ for file in split(args["file"], ",")
     if num_windows != 0
         println("$num_windows windows identified for $file.")
     else
-        windows = [[frequency[1], frequency[2]/2]]
+        windows = []
         println("No lines identified for $file.")
     end
 
@@ -505,10 +469,10 @@ for file in split(args["file"], ",")
                 plt.subplot(3, 5, j+1)
                 j += Int(15*i)
                 x1, x2 = windows[j+1,:]
-                margin = max(args["width"]*dx, 0.4*(x2-x1))
-                cond = (frequency .> x1 - margin) .* (frequency .< x2 + margin)
-                xj = frequency[cond]
-                yrj = intensity_red[cond]
+                margin = max(args["ref_width"]*dx, 0.4*(x2-x1))
+                mask = (frequency .> x1 - margin) .* (frequency .< x2 + margin)
+                xj = frequency[mask]
+                yrj = intensity_red[mask]
                 plt.step(xj, yrj, where="mid", color="black")
                 plt.axvspan(x1, x2, color="gray", alpha=0.2)
                 plt.margins(x=0, y=0.1)
